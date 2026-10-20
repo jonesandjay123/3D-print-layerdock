@@ -92,7 +92,7 @@ base_t = 5;
 // Height of the four corner bosses the pegs grow from
 base_boss_h = 6;
 // Two low ribs that centre the Xbox when sliding it in
-guides = true;
+guides = false;
 guide_h = 3;
 guide_w = 4;
 // Gap between Xbox side and guide rib
@@ -101,7 +101,7 @@ guide_len = 110;
 // Distance of the guide ribs from the front edge
 guide_setback = 15;
 // Low rib behind the Xbox so it always stops with the plug zone free
-rear_stop = true;
+rear_stop = false;
 
 /* [Top] */
 // Top plate thickness
