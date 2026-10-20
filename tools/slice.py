@@ -116,7 +116,7 @@ def main():
         cmd = [exe, "--debug", "1",
                "--load-settings", f"{pdir}/machine.json;{pdir}/process.json",
                "--load-filaments", f"{pdir}/filament.json",
-               "--slice", "0", "--export-3mf", os.path.join(out, name + ".3mf"),
+               "--slice", "0", "--export-3mf", name + ".3mf",  # relative: an absolute path makes the .tmp write fail
                "--outputdir", out, os.path.join(ROOT, "stl", stl)]
         print(f"slicing {stl} ...", flush=True)
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=out)  # Bambu writes result.json to cwd
