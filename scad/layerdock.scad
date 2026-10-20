@@ -72,7 +72,7 @@ peg_h = 12;
 // Chamfer on the top edges of the peg (lead-in)
 peg_chamfer = 1.5;
 // Socket clearance per side.  Printed holes come out ~0.1 mm small; crush ribs absorb the rest.
-socket_fit = 0.15;
+socket_fit = 0.25;
 // Extra socket depth so the peg never bottoms out before the post faces meet
 socket_extra = 0.5;
 // 45° chamfer at the socket mouth (kills elephant foot, guides the peg)
@@ -84,7 +84,7 @@ rib_w = 1.2;
 // Rib protrusion into the socket
 rib_h = 0.35;
 // Socket clearances on the test coupon (front → back)
-test_fits = [0.05, 0.15, 0.25];
+test_fits = [0.20, 0.25, 0.30];
 
 /* [Base] */
 // Base plate thickness
