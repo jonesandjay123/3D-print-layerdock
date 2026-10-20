@@ -7,6 +7,8 @@ A modular, 3D-printable device stand built with stackable layers, an open frame,
 
 目前版本 **v0.1.1**：一體式接頭、A1 mini 可列印性驗證。
 
+**列印狀態（2026-10-20）**：試件、Base、第 1 個 Layer 已用 PLA 印出並壓合成功；Top 與其餘 Layer 用 `print/` 裡的專案檔直接印。
+
 ![組裝圖](docs/images/assembly.png)
 
 綠色線框是 Xbox Series S（直立），紅色線框是 Mac mini。
