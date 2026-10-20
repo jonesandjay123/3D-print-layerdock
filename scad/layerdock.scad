@@ -288,8 +288,13 @@ module test_part() {
     difference() {
         cube([pitch * len(test_fits), post, test_bar_h]);
         // sockets open at z = 0, i.e. mouth on the bed, exactly like the Layer and Top
-        for (i = [0 : len(test_fits) - 1])
+        for (i = [0 : len(test_fits) - 1]) {
             socket_cutter_at(i * pitch, 0, post, test_fits[i]);
+            // i+1 grooves on the front face next to socket i: 1 groove = test_fits[0], 2 = [1], ...
+            for (k = [0 : i])
+                translate([i * pitch + pitch / 2 + (k - i / 2) * 3 - 0.6, -eps, 2])
+                    cube([1.2, 0.8 + eps, test_bar_h]);
+        }
     }
     translate([0, post + 10, 0]) {
         cube([post, post, test_stub_h]);

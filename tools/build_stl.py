@@ -309,7 +309,13 @@ def build_test():
     fits = D("test_fits")
     pitch = post
     bar = box(0, 0, 0, pitch * len(fits), post, test_bar_h, "test-bar")
-    difference(bar, [socket_cutter_at(i * pitch, 0, post, f) for i, f in enumerate(fits)])
+    cutters = []
+    for i, f in enumerate(fits):
+        cutters.append(socket_cutter_at(i * pitch, 0, post, f))
+        # i+1 grooves on the front face next to socket i: 1 groove = fits[0], 2 = fits[1], ...
+        for k in range(i + 1):
+            cutters.append(box(i * pitch + pitch / 2 + (k - i / 2) * 3 - 0.6, -EPS, 2, 1.2, 0.8 + EPS, test_bar_h))
+    difference(bar, cutters)
     stub = union([box(0, post + 10, 0, post, post, test_stub_h), peg_at(0, post + 10, test_stub_h)], "stub")
     ob = join([bar, stub], "test-coupon")
     clean(ob)
