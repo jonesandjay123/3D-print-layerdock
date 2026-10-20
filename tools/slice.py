@@ -2,14 +2,14 @@
 """
 Slice every STL in stl/ with the locally installed Bambu Studio (CLI mode) using
 the stock "Bambu Lab A1 mini 0.4 nozzle" + "0.20mm Standard @BBL A1M" +
-"Bambu PETG Basic" profiles, then write docs/print-report.md with print time,
+"Bambu PLA Basic" profiles, then write docs/print-report.md with print time,
 filament, brim, and the real footprint of everything the nozzle touches.
 
 Nothing is printed and nothing is sent to a printer; this is a dry run of the
 slicer.  Bambu's profile JSONs inherit from each other, so they are flattened
 into build/profiles/ first (that folder is git-ignored).
 
-Usage: tools/slice.py [--app /Applications/BambuStudio.app] [--plate "Textured PEI Plate"]
+Usage: tools/slice.py [--app /Applications/BambuStudio.app] [--plate "Textured PEI Plate"] [--filament "Bambu PETG Basic @BBL A1M 0.4 nozzle"]
 """
 import json
 import os
@@ -23,7 +23,7 @@ BUILD = os.path.join(ROOT, "build")
 APP = "/Applications/BambuStudio.app"
 MACHINE = "Bambu Lab A1 mini 0.4 nozzle"
 PROCESS = "0.20mm Standard @BBL A1M"
-FILAMENT = "Bambu PETG Basic @BBL A1M 0.4 nozzle"
+FILAMENT = "Bambu PLA Basic @BBL A1M"  # Jones prints PLA; --filament overrides
 BED = 180.0
 
 
@@ -87,6 +87,9 @@ def main():
         app = args[args.index("--app") + 1]
     if "--plate" in args:
         plate = args[args.index("--plate") + 1]
+    global FILAMENT
+    if "--filament" in args:
+        FILAMENT = args[args.index("--filament") + 1]
     exe = os.path.join(app, "Contents", "MacOS", "BambuStudio")
     profiles_dir = os.path.join(app, "Contents", "Resources", "profiles", "BBL")
     if not os.path.exists(exe):

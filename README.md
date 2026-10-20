@@ -20,7 +20,7 @@ A modular, 3D-printable device stand built with stackable layers, an open frame,
 | 接頭 | 柱頂 **11 × 11 × 12 mm 方榫**，下一件底部對應方孔，孔內四條**壓合肋** | 零件直接互插、可重複拆裝、受力走柱子端面，見下方 |
 | Xbox 方向 | 直立，**電源鍵那面（63.5 mm 窄面）朝前**，圓形風扇面朝側邊 | 180 mm 平台塞不下「151 mm 面朝前 + 手指空隙 + 柱子」，見下方 |
 | 層高 | 60 mm × 5 層；Xbox 上方淨高 306 mm | Xbox 275 + 餘裕；要更高就多疊一層 |
-| 材料 | PETG | 韌性好，壓合肋不易裂 |
+| 材料 | PLA（Jones 家裡的料）；PETG 亦可 | 室內靜置、1 kg 內，PLA 足夠；切片報告以 Bambu PLA Basic 計算 |
 
 ### 為什麼 Xbox 要轉 90°
 
@@ -69,16 +69,16 @@ Xbox Series S 直立時是 63.5（寬）× 151（深）× 275（高）mm。151 m
 
 ### 已做：Bambu Studio 2.8 CLI 切片乾跑（本機實際切片，未列印）
 
-用 Bambu Studio 內建的 `Bambu Lab A1 mini 0.4 nozzle` + `0.20mm Standard @BBL A1M` + `Bambu PETG Basic` + 紋理 PEI 板，**未改任何參數**。完整表在 [docs/print-report.md](docs/print-report.md)。
+用 Bambu Studio 內建的 `Bambu Lab A1 mini 0.4 nozzle` + `0.20mm Standard @BBL A1M` + `Bambu PLA Basic` + 紋理 PEI 板，**未改任何參數**。完整表在 [docs/print-report.md](docs/print-report.md)。
 
 | 零件 | 時間 | 材料 | 噴頭實際走過的範圍 | 自動 brim | 支撐 |
 | --- | --- | --- | --- | --- | --- |
-| Base | 2 h 12 m | 84 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
-| Layer（×5） | 2 h 22 m | 66 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
-| Top | 2 h 24 m | 75 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
-| 試件 | 30 m | 11 g | 59.6 × 49.6 mm | 判定不需要 | 無 |
+| Base | 1 h 47 m | 89 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
+| Layer（×5） | 1 h 57 m | 70 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
+| Top | 2 h 10 m | 79 g | 165.6 × 171.6 mm | 判定不需要 | 無 |
+| 試件 | 24 m | 11 g | 59.6 × 49.6 mm | 判定不需要 | 無 |
 
-整套（5 層）約 **16.5 小時、490 g PETG**。切片特徵只有牆、填充、頂底面、方孔天花板的 11 mm 橋接；沒有懸空（overhang）警告、沒有支撐。
+整套（5 層）約 **13.7 小時、520 g PLA**（PETG 約 16.5 小時、490 g）。切片特徵只有牆、填充、頂底面、方孔天花板的 11 mm 橋接；沒有懸空（overhang）警告、沒有支撐。
 
 ### 幾何層面的檢查（`tools/check_stl.py`，每次建置都跑）
 
@@ -92,7 +92,7 @@ Xbox Series S 直立時是 63.5（寬）× 151（深）× 275（高）mm。151 m
 - 填充 15% → 20%，Base 與 Top 可留 15%。
 - 象腳補償 0 → 0.15 mm（孔口導角已經處理大部分，這是保險）。
 - Brim：自動判定不需要。PETG 在紋理 PEI 上大面積平板偶爾翹角，若擔心可開 3 mm brim，166 × 172 + 6 仍在 180 內。
-- 第一層用預設 0.2 mm，不要用膠水（PETG 在紋理 PEI 上反而太黏，拆件會傷板）。
+- 第一層用預設 0.2 mm，紋理 PEI 板不需要膠水。
 
 ### 尚未做（需要實體測試）
 
@@ -103,7 +103,7 @@ Xbox Series S 直立時是 63.5（寬）× 151（深）× 275（高）mm。151 m
 
 ## 穩定性評估（計算值，未實測）
 
-質量用切片器的預設設定估計：Base 84 g、Layer 66 g × 5、Top 75 g，架子共約 490 g。Xbox Series S 1.93 kg、Mac mini M4 0.67 kg。底座半寬 83 × 86 mm。
+質量用切片器的預設設定估計（PLA）：Base 89 g、Layer 70 g × 5、Top 79 g，架子共約 520 g。Xbox Series S 1.93 kg、Mac mini M4 0.67 kg。底座半寬 83 × 86 mm。
 
 | 狀態 | 總重 | 重心高度 | 傾倒角 | 在頂部水平推多少力會倒 |
 | --- | --- | --- | --- | --- |
