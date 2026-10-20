@@ -1,16 +1,20 @@
 """
 Build layerdock STLs and preview renders with Blender (headless).
 
-This mirrors the geometry in scad/layerdock.scad so that STLs can be produced
-on a machine without OpenSCAD.  All numbers come from the .scad file: the
-parameter block at its top is parsed, so there is a single source of truth.
+This is a 1:1 mirror of the geometry in scad/layerdock.scad so that STLs can be
+produced on a machine without OpenSCAD.  Every number comes from the parameter
+block at the top of the .scad file (parsed below) — one source of truth for
+dimensions.  Each `module` in the .scad has a `build_*` / `*_at` twin here with
+the same name and the same box list, in the same order.  If you change one,
+change the other; tools/check_consistency.py compares the two when OpenSCAD
+is installed.
 
 Usage:
-    /Applications/Blender.app/Contents/MacOS/Blender -b -P tools/build_stl.py -- [--no-render]
+    blender -b --python-exit-code 1 -P tools/build_stl.py -- [--no-render]
 
 Outputs:
-    stl/base.stl, stl/layer.stl, stl/top.stl, stl/pin.stl, stl/test-coupon.stl
-    docs/images/assembly.png, docs/images/exploded.png, docs/images/parts.png
+    stl/base.stl, stl/layer.stl, stl/top.stl, stl/test-coupon.stl
+    docs/images/assembly.png, exploded.png, parts.png, joint.png
 """
 import math
 import os
@@ -59,15 +63,29 @@ def D(name):
 
 
 # derived, same as the [Hidden] block in the .scad
-socket = D("pin") + D("socket_clear")
-socket_depth = D("pin_len") / 2 + D("socket_extra")
-xbox_x = (D("frame_w") - D("xbox_w")) / 2
-xbox_y = -D("xbox_front_overhang")
-inner_h = D("base_boss_h") + int(D("layers")) * D("layer_h")
-plug_zone = (D("frame_d") - D("rear_rail_t")) - (xbox_y + D("xbox_d"))
+peg, peg_h = D("peg"), D("peg_h")
+socket = peg + 2 * D("socket_fit")
+socket_depth = peg_h + D("socket_extra")
 post = D("post")
 frame_w, frame_d = D("frame_w"), D("frame_d")
-corners = [(0, 0), (frame_w - post, 0), (0, frame_d - post), (frame_w - post, frame_d - post)]
+layer_h = D("layer_h")
+base_t, base_boss_h = D("base_t"), D("base_boss_h")
+top_t, top_boss, top_boss_h = D("top_t"), D("top_boss"), D("top_boss_h")
+xbox_x = (frame_w - D("xbox_w")) / 2
+xbox_y = -D("xbox_front_overhang")
+plug_zone = (frame_d - D("rear_rail_t")) - (xbox_y + D("xbox_d"))
+N_LAYERS = int(D("layers"))
+inner_h = base_boss_h + N_LAYERS * layer_h
+total_h = base_t + inner_h + top_t + top_boss_h
+wall = (post - peg) / 2 - D("socket_fit")
+mac_x = (frame_w - D("mac_w")) / 2
+mac_y = (frame_d - D("mac_d")) / 2
+test_bar_h = socket_depth + 3
+test_stub_h = 8
+
+
+def corners(size):
+    return [(0, 0), (frame_w - size, 0), (0, frame_d - size), (frame_w - size, frame_d - size)]
 
 
 # --------------------------------------------------------------------- CSG helpers
@@ -91,11 +109,14 @@ def mesh_obj(name, verts, faces):
     return ob
 
 
+def box_pts(x, y, z, sx, sy, sz):
+    return [(x, y, z), (x + sx, y, z), (x + sx, y + sy, z), (x, y + sy, z),
+            (x, y, z + sz), (x + sx, y, z + sz), (x + sx, y + sy, z + sz), (x, y + sy, z + sz)]
+
+
 def box(x, y, z, sx, sy, sz, name="box"):
-    v = [(x, y, z), (x + sx, y, z), (x + sx, y + sy, z), (x, y + sy, z),
-         (x, y, z + sz), (x + sx, y, z + sz), (x + sx, y + sy, z + sz), (x, y + sy, z + sz)]
     f = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
-    return mesh_obj(name, v, f)
+    return mesh_obj(name, box_pts(x, y, z, sx, sy, sz), f)
 
 
 def delete(ob):
@@ -123,7 +144,7 @@ def join(objs, name):
     return objs[0]
 
 
-def union(objs, name):
+def union(objs, name="union"):
     base = objs[0]
     for o in objs[1:]:
         boolean(base, o, "UNION")
@@ -135,6 +156,11 @@ def difference(target, cutters):
     if cutters:
         cutter = join(cutters, "cutter") if len(cutters) > 1 else cutters[0]
         boolean(target, cutter, "DIFFERENCE")
+    return target
+
+
+def intersection(target, other):
+    boolean(target, other, "INTERSECT")
     return target
 
 
@@ -170,24 +196,54 @@ def clean(ob):
     ob.data.update()
 
 
-# --------------------------------------------------------------------- sockets
-def socket_cutter(x, y, z_open, up):
-    off = (post - socket) / 2
-    if up > 0:
-        return box(x + off, y + off, z_open - socket_depth, socket, socket, socket_depth + EPS)
-    return box(x + off, y + off, z_open - EPS, socket, socket, socket_depth + EPS)
+def volume(ob):
+    bm = bmesh.new()
+    bm.from_mesh(ob.data)
+    v = bm.calc_volume(signed=True)
+    bm.free()
+    return v
 
 
-def sockets(z_open, up):
-    return [socket_cutter(x, y, z_open, up) for x, y in corners]
+# --------------------------------------------------------------------- joint features (twins of the .scad modules)
+def peg_at(x, y, z0):
+    """Integrated peg growing upward from z0, centred on a post-sized square at corner (x, y)."""
+    c = D("peg_chamfer")
+    ox, oy, oz = x + (post - peg) / 2, y + (post - peg) / 2, z0 - EPS
+    pts = box_pts(ox, oy, oz, peg, peg, peg_h - c + EPS) + \
+        box_pts(ox + c, oy + c, oz, peg - 2 * c, peg - 2 * c, peg_h + EPS)
+    return hull_obj("peg", pts)
+
+
+def socket_cutter_at(x, y, size, fit=None):
+    """Socket cutter opening at z=0 going up, centred on a size-sized square at corner (x, y).
+    Includes the mouth chamfer; crush ribs are subtracted from the cutter so they remain."""
+    if fit is None:
+        fit = D("socket_fit")
+    cx, cy = x + size / 2, y + size / 2
+    s = peg + 2 * fit
+    mc = D("socket_mouth_chamfer")
+    body = box(cx - s / 2, cy - s / 2, -EPS, s, s, socket_depth + EPS, "socket")
+    mouth = hull_obj("mouth", box_pts(cx - s / 2 - mc, cy - s / 2 - mc, -EPS, s + 2 * mc, s + 2 * mc, EPS) +
+                     box_pts(cx - s / 2, cy - s / 2, mc, s, s, EPS))
+    cutter = union([body, mouth], "socket")
+    if D("crush_ribs"):
+        rw, rh = D("rib_w"), D("rib_h")
+        z0 = mc + 1
+        zl = socket_depth + 1 - z0
+        ribs = [box(cx + s / 2 - rh, cy - rw / 2, z0, rh + 1, rw, zl),
+                box(cx - s / 2 - 1, cy - rw / 2, z0, rh + 1, rw, zl),
+                box(cx - rw / 2, cy + s / 2 - rh, z0, rw, rh + 1, zl),
+                box(cx - rw / 2, cy - s / 2 - 1, z0, rw, rh + 1, zl)]
+        difference(cutter, ribs)
+    return cutter
 
 
 # --------------------------------------------------------------------- parts
 def build_base():
-    base_t, boss_h = D("base_t"), D("base_boss_h")
     solids = [box(0, 0, 0, frame_w, frame_d, base_t, "plate")]
-    for x, y in corners:
-        solids.append(box(x, y, 0, post, post, base_t + boss_h))
+    for x, y in corners(post):
+        solids.append(box(x, y, 0, post, post, base_t + base_boss_h))
+        solids.append(peg_at(x, y, base_t + base_boss_h))
     if D("guides"):
         gw, gg, gl, gs, gh = D("guide_w"), D("guide_gap"), D("guide_len"), D("guide_setback"), D("guide_h")
         for sx in (-1, 1):
@@ -198,44 +254,44 @@ def build_base():
         solids.append(box(xbox_x - gg, xbox_y + D("xbox_d") + 1, base_t - EPS,
                           D("xbox_w") + 2 * gg, 3, D("guide_h") + EPS))
     ob = union(solids, "base")
-    difference(ob, sockets(base_t + boss_h, 1))
     clean(ob)
     return ob
 
 
 def build_layer():
-    lh = D("layer_h")
     srt, srh, rrt, rrh = D("side_rail_t"), D("side_rail_h"), D("rear_rail_t"), D("rear_rail_h")
-    solids = [box(x, y, 0, post, post, lh) for x, y in corners]
+    solids = []
+    for x, y in corners(post):
+        solids.append(box(x, y, 0, post, post, layer_h))
+        solids.append(peg_at(x, y, layer_h))
     for x in (0, frame_w - srt):
-        solids.append(box(x, post - EPS, lh - srh, srt, frame_d - 2 * post + 2 * EPS, srh))
-    solids.append(box(post - EPS, frame_d - rrt, lh - rrh, frame_w - 2 * post + 2 * EPS, rrt, rrh))
+        solids.append(box(x, post - EPS, 0, srt, frame_d - 2 * post + 2 * EPS, srh))
+    solids.append(box(post - EPS, frame_d - rrt, 0, frame_w - 2 * post + 2 * EPS, rrt, rrh))
     ob = union(solids, "layer")
-    difference(ob, sockets(0, -1) + sockets(lh, 1))
+    difference(ob, [socket_cutter_at(x, y, post) for x, y in corners(post)])
     clean(ob)
     return ob
 
 
 def build_top():
-    tt, bh, rh, rt = D("top_t"), D("top_boss_h"), D("rim_h"), D("rim_t")
+    rh, rt = D("rim_h"), D("rim_t")
     mac_w, mac_d, gap = D("mac_w"), D("mac_d"), D("mac_gap")
-    mac_x, mac_y = (frame_w - mac_w) / 2, (frame_d - mac_d) / 2
-    solids = [box(0, 0, 0, frame_w, frame_d, tt, "plate")]
-    for x, y in corners:
-        solids.append(box(x, y, 0, post, post, tt + bh))
+    solids = [box(0, 0, 0, frame_w, frame_d, top_t, "plate")]
+    for x, y in corners(top_boss):
+        solids.append(box(x, y, 0, top_boss, top_boss, top_t + top_boss_h))
     # outer rim as four bars (overlapping at the corners is fine for the union)
-    solids.append(box(0, 0, tt - EPS, frame_w, rt, rh + EPS))
-    solids.append(box(0, frame_d - rt, tt - EPS, frame_w, rt, rh + EPS))
-    solids.append(box(0, 0, tt - EPS, rt, frame_d, rh + EPS))
-    solids.append(box(frame_w - rt, 0, tt - EPS, rt, frame_d, rh + EPS))
+    solids.append(box(0, 0, top_t - EPS, frame_w, rt, rh + EPS))
+    solids.append(box(0, frame_d - rt, top_t - EPS, frame_w, rt, rh + EPS))
+    solids.append(box(0, 0, top_t - EPS, rt, frame_d, rh + EPS))
+    solids.append(box(frame_w - rt, 0, top_t - EPS, rt, frame_d, rh + EPS))
     if D("stops"):
         st, sl, sh = D("stop_t"), D("stop_len"), D("stop_h")
-        solids.append(box(mac_x - gap - st, frame_d / 2 - sl / 2, tt - EPS, st, sl, sh + EPS))
-        solids.append(box(mac_x + mac_w + gap, frame_d / 2 - sl / 2, tt - EPS, st, sl, sh + EPS))
-        solids.append(box(frame_w / 2 - sl / 2, mac_y - gap - st, tt - EPS, sl, st, sh + EPS))
-        solids.append(box(frame_w / 2 - sl / 2, mac_y + mac_d + gap, tt - EPS, sl, st, sh + EPS))
+        solids.append(box(mac_x - gap - st, frame_d / 2 - sl / 2, top_t - EPS, st, sl, sh + EPS))
+        solids.append(box(mac_x + mac_w + gap, frame_d / 2 - sl / 2, top_t - EPS, st, sl, sh + EPS))
+        solids.append(box(frame_w / 2 - sl / 2, mac_y - gap - st, top_t - EPS, sl, st, sh + EPS))
+        solids.append(box(frame_w / 2 - sl / 2, mac_y + mac_d + gap, top_t - EPS, sl, st, sh + EPS))
     ob = union(solids, "top")
-    cutters = sockets(0, -1)
+    cutters = [socket_cutter_at(x, y, post) for x, y in corners(post)]  # on the post grid
     if D("vents"):
         vi, vw, vp = D("vent_inset"), D("vent_w"), D("vent_pitch")
         vx0, vx1 = mac_x + vi, mac_x + mac_w - vi
@@ -243,52 +299,34 @@ def build_top():
         n = int(math.floor((vx1 - vx0 - vw) / vp)) + 1
         x_start = (vx0 + vx1) / 2 - ((n - 1) * vp + vw) / 2
         for i in range(n):
-            cutters.append(box(x_start + i * vp, vy0, -EPS, vw, vy1 - vy0, tt + 2 * EPS))
+            cutters.append(box(x_start + i * vp, vy0, -EPS, vw, vy1 - vy0, top_t + 2 * EPS))
     difference(ob, cutters)
     clean(ob)
     return ob
 
 
-def pin_points(ox=0, oy=0, oz=0):
-    p, L, c = D("pin"), D("pin_len"), D("pin_chamfer")
-    pts = []
-    for (x0, x1, y0, y1, z) in ((c, p - c, c, p - c, 0), (0, p, 0, p, c), (0, p, 0, p, L - c), (c, p - c, c, p - c, L)):
-        for x in (x0, x1):
-            for y in (y0, y1):
-                pts.append((ox + x, oy + y, oz + z))
-    return pts
-
-
-def build_pin():
-    return hull_obj("pin", pin_points())
-
-
 def build_test():
-    clearances = D("test_clearances")
+    fits = D("test_fits")
     pitch = post
-    h = socket_depth + 3
-    block = box(0, 0, 0, pitch * len(clearances), post, h, "test-coupon")
-    cutters = []
-    for i, cl in enumerate(clearances):
-        s = D("pin") + cl
-        cutters.append(box(i * pitch + (pitch - s) / 2, (post - s) / 2, 3, s, s, socket_depth + EPS))
-    difference(block, cutters)
-    clean(block)
-    pin = build_pin()
-    to_print_orientation_pin(pin)
-    transform_verts(pin, lambda v: (v.x, v.y + post + 8, v.z))
-    return join([block, pin], "test-coupon")
+    bar = box(0, 0, 0, pitch * len(fits), post, test_bar_h, "test-bar")
+    difference(bar, [socket_cutter_at(i * pitch, 0, post, f) for i, f in enumerate(fits)])
+    stub = union([box(0, post + 10, 0, post, post, test_stub_h), peg_at(0, post + 10, test_stub_h)], "stub")
+    ob = join([bar, stub], "test-coupon")
+    clean(ob)
+    return ob
 
 
-# --------------------------------------------------------------------- print orientation
-def to_print_orientation_layer(ob):
-    lh = D("layer_h")
-    transform_verts(ob, lambda v: (v.x, frame_d - v.y, lh - v.z))
-
-
-def to_print_orientation_pin(ob):
-    p = D("pin")
-    transform_verts(ob, lambda v: (v.x, v.z, p - v.y))
+def build_joint(gap=10):
+    """One corner of the Base + bottom 30 mm of one Layer post, sectioned at y = post/2."""
+    b = build_base()
+    intersection(b, box(0, 0, 0, post + 10, post + 10, 100))
+    l = build_layer()
+    intersection(l, box(0, 0, 0, post + 10, post + 10, 30))
+    transform_verts(l, lambda v: (v.x, v.y, v.z + base_t + base_boss_h + gap))
+    ob = union([b, l], "joint")
+    difference(ob, [box(-1, -100, -1, post + 20, 100 + post / 2, 200)])  # remove the front half
+    clean(ob)
+    return ob
 
 
 # --------------------------------------------------------------------- export
@@ -298,10 +336,7 @@ def export_stl(ob, filename):
     bpy.ops.object.select_all(action="DESELECT")
     ob.select_set(True)
     bpy.context.view_layer.objects.active = ob
-    if hasattr(bpy.ops.wm, "stl_export"):
-        bpy.ops.wm.stl_export(filepath=path, export_selected_objects=True, ascii_format=False)
-    else:  # Blender < 4.2
-        bpy.ops.export_mesh.stl(filepath=path, use_selection=True)
+    bpy.ops.wm.stl_export(filepath=path, export_selected_objects=True, ascii_format=False)
     print(f"wrote {os.path.relpath(path, ROOT)}")
 
 
@@ -338,7 +373,6 @@ def setup_render(width=1400, height=1100):
     sc.render.engine = "BLENDER_WORKBENCH"
     sc.render.resolution_x = width
     sc.render.resolution_y = height
-    bpy.context.view_layer.update()
     sc.render.resolution_percentage = 100
     sc.render.image_settings.file_format = "PNG"
     sh = sc.display.shading
@@ -357,7 +391,7 @@ def setup_render(width=1400, height=1100):
 
 
 def scene_bounds(objs):
-    bpy.context.view_layer.update()  # new objects need this before matrix_world is valid
+    bpy.context.view_layer.update()
     lo = [1e9, 1e9, 1e9]
     hi = [-1e9, -1e9, -1e9]
     for ob in objs:
@@ -371,6 +405,7 @@ def scene_bounds(objs):
 
 def camera_look(objs, direction, lens=50, margin=1.06):
     """Perspective camera looking along -direction, framed on the objects' bounding box."""
+    from bpy_extras.object_utils import world_to_camera_view
     sc = bpy.context.scene
     lo, hi = scene_bounds(objs)
     center = Vector([(lo[i] + hi[i]) / 2 for i in range(3)])
@@ -378,27 +413,21 @@ def camera_look(objs, direction, lens=50, margin=1.06):
     cam_data = bpy.data.cameras.new("cam")
     cam_data.type = "PERSP"
     cam_data.lens = lens
-    cam_data.sensor_fit = "AUTO"
     cam_data.clip_end = 20000
     w, h = sc.render.resolution_x, sc.render.resolution_y
-    sensor = 36.0
-    fov_w = 2 * math.atan(sensor / (2 * lens))
-    fov_h = 2 * math.atan(sensor * (h / w) / (2 * lens)) if w >= h else 2 * math.atan(sensor / (2 * lens))
-    fov = min(fov_w, fov_h)
+    fov = 2 * math.atan(36.0 * min(1.0, h / w) / (2 * lens))
     dist = radius / math.sin(fov / 2) * margin
     cam = bpy.data.objects.new("cam", cam_data)
     sc.collection.objects.link(cam)
     d = Vector(direction).normalized()
     cam.rotation_euler = (-d).to_track_quat("-Z", "Y").to_euler()
     sc.camera = cam
-    # tighten: project the bbox corners and shrink the distance until they fill the frame
-    from bpy_extras.object_utils import world_to_camera_view
-    corners8 = [Vector((x, y, z)) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    pts = [Vector((x, y, z)) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
     for _ in range(4):
         cam.location = center + d * dist
         bpy.context.view_layer.update()
         dev = 0.0
-        for c in corners8:
+        for c in pts:
             u, v, _ = world_to_camera_view(sc, cam, c)
             dev = max(dev, abs(u - 0.5), abs(v - 0.5))
         dist *= (dev / 0.5) * margin
@@ -413,9 +442,10 @@ def render(path):
     print(f"wrote {os.path.relpath(path, ROOT)}")
 
 
-def clear_scene():
+def clear_render_objects():
     for ob in list(bpy.data.objects):
-        bpy.data.objects.remove(ob, do_unlink=True)
+        if ob.name.startswith(("a_", "p_", "j_", "xbox", "mac", "cam")):
+            delete(ob)
 
 
 GREY = (0.45, 0.48, 0.52, 1)
@@ -426,28 +456,16 @@ GHOST_X = (0.15, 0.65, 0.25, 1)
 GHOST_M = (0.75, 0.25, 0.25, 1)
 
 
-def place_stack(parts, gap=0.0, with_pins=False, ghosts=True):
-    """Lay out base + layers + top (+ pins) along z; gap>0 gives an exploded view."""
-    base_t, boss_h, lh, tt = D("base_t"), D("base_boss_h"), D("layer_h"), D("top_t")
-    n = int(D("layers"))
-    objs = []
-    z_joint = base_t + boss_h  # plane where base meets layer 1
-    objs.append(copy_obj(parts["base"], "a_base", 0, 0, 0, GREY))
-    for i in range(n):
-        z = base_t + boss_h + i * lh
-        objs.append(copy_obj(parts["layer"], f"a_layer{i}", 0, 0, z + (i + 1) * gap, BLUE_A if i % 2 == 0 else BLUE_B))
-    z_top = base_t + inner_h
-    objs.append(copy_obj(parts["top"], "a_top", 0, 0, z_top + (n + 1) * gap, GREY))
-    if with_pins:
-        L = D("pin_len")
-        for j in range(n + 1):
-            zj = z_joint + j * lh + j * gap + gap / 2 - L / 2
-            for x, y in corners:
-                objs.append(copy_obj(parts["pin"], f"a_pin{j}", x + (post - D("pin")) / 2, y + (post - D("pin")) / 2, zj, ORANGE))
+def place_stack(parts, gap=0.0, ghosts=True):
+    objs = [copy_obj(parts["base"], "a_base", 0, 0, 0, GREY)]
+    for i in range(N_LAYERS):
+        z = base_t + base_boss_h + i * layer_h + (i + 1) * gap
+        objs.append(copy_obj(parts["layer"], f"a_layer{i}", 0, 0, z, BLUE_A if i % 2 == 0 else BLUE_B))
+    z_top = base_t + inner_h + (N_LAYERS + 1) * gap
+    objs.append(copy_obj(parts["top"], "a_top", 0, 0, z_top, GREY))
     if ghosts:
         objs.append(ghost_box("xbox", xbox_x, xbox_y, base_t, D("xbox_w"), D("xbox_d"), D("xbox_h"), GHOST_X))
-        objs.append(ghost_box("mac", (frame_w - D("mac_w")) / 2, (frame_d - D("mac_d")) / 2,
-                              z_top + (n + 1) * gap + tt, D("mac_w"), D("mac_d"), D("mac_h"), GHOST_M))
+        objs.append(ghost_box("mac", mac_x, mac_y, z_top + top_t, D("mac_w"), D("mac_d"), D("mac_h"), GHOST_M))
     return objs
 
 
@@ -456,71 +474,65 @@ def main():
     do_render = "--no-render" not in args
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    clear_scene()
-    print(f"layerdock: boolean solver {SOLVER}; inner height {inner_h} mm; plug zone {plug_zone} mm")
+    for ob in list(bpy.data.objects):
+        delete(ob)
+    print(f"layerdock v0.1.1: solver {SOLVER}; inner width {frame_w - 2 * post:.1f} mm; inner height {inner_h:.1f} mm; "
+          f"plug zone {plug_zone:.1f} mm; total height {total_h:.1f} mm; socket wall {wall:.2f} mm")
+    if inner_h < D("xbox_h") + D("xbox_headroom"):
+        print("WARNING: not enough height for the Xbox")
+    if plug_zone < D("xbox_min_plug_zone"):
+        print("WARNING: plug zone too small")
 
-    parts = {
-        "base": build_base(),
-        "layer": build_layer(),
-        "top": build_top(),
-        "pin": build_pin(),
-    }
-    test = build_test()
-
-    # --- STL in print orientation
-    export_stl(parts["base"], "base.stl")
-    export_stl(parts["top"], "top.stl")
-    layer_p = copy_obj(parts["layer"], "layer_print")
-    to_print_orientation_layer(layer_p)
-    export_stl(layer_p, "layer.stl")
-    pin_p = copy_obj(parts["pin"], "pin_print")
-    to_print_orientation_pin(pin_p)
-    export_stl(pin_p, "pin.stl")
-    export_stl(test, "test-coupon.stl")
-
-    for name, ob in list(parts.items()) + [("layer.stl", layer_p), ("pin.stl", pin_p), ("test", test)]:
+    parts = {"base": build_base(), "layer": build_layer(), "top": build_top(), "test": build_test()}
+    for name, ob in parts.items():
+        export_stl(ob, {"test": "test-coupon"}.get(name, name) + ".stl")
         lo, hi = bbox(ob)
-        print(f"  {name:10s} bbox {hi[0]-lo[0]:.1f} x {hi[1]-lo[1]:.1f} x {hi[2]-lo[2]:.1f} mm")
+        print(f"  {name:6s} bbox {hi[0]-lo[0]:.1f} x {hi[1]-lo[1]:.1f} x {hi[2]-lo[2]:.1f} mm, "
+              f"volume {volume(ob)/1000:.1f} cm3")
 
     if not do_render:
         return
 
     setup_render()
-    # hide the masters; renders use copies
-    for ob in list(parts.values()) + [layer_p, pin_p, test]:
+    for ob in parts.values():
         ob.hide_render = True
 
-    # --- assembled view
-    tot_h = D("base_t") + inner_h + D("top_t") + D("top_boss_h")
-    objs = place_stack(parts, gap=0, with_pins=False, ghosts=True)
+    # assembled view
+    objs = place_stack(parts, gap=0, ghosts=True)
     camera_look(objs, (-1.0, -1.6, 0.7))
     render(os.path.join(IMG_DIR, "assembly.png"))
-    for ob in list(bpy.data.objects):
-        if ob.name.startswith(("a_", "xbox", "mac", "cam")):
-            delete(ob)
+    clear_render_objects()
 
-    # --- exploded view with pins
-    gap = 45
-    n = int(D("layers"))
-    objs = place_stack(parts, gap=gap, with_pins=True, ghosts=False)
+    # exploded view
+    objs = place_stack(parts, gap=40, ghosts=False)
     camera_look(objs, (-1.0, -1.6, 0.55))
     render(os.path.join(IMG_DIR, "exploded.png"))
-    for ob in objs + [bpy.context.scene.camera]:
-        delete(ob)
+    clear_render_objects()
 
-    # --- parts in print orientation, side by side
-    row = [("base", parts["base"], GREY), ("layer", layer_p, BLUE_B), ("top", parts["top"], GREY),
-           ("pin", pin_p, ORANGE), ("test", test, ORANGE)]
+    # parts in print orientation, side by side
+    bpy.context.scene.render.resolution_x = 1800
+    bpy.context.scene.render.resolution_y = 750
     x = 0
     objs = []
-    for name, ob, col in row:
+    for name, col in (("base", GREY), ("layer", BLUE_B), ("top", GREY), ("test", ORANGE)):
+        ob = parts[name]
         lo, hi = bbox(ob)
         objs.append(copy_obj(ob, f"p_{name}", x - lo[0], -lo[1], -lo[2], col))
         x += (hi[0] - lo[0]) + 30
-    bpy.context.scene.render.resolution_x = 1800
-    bpy.context.scene.render.resolution_y = 750
     camera_look(objs, (-0.25, -1.0, 1.0), lens=60)
     render(os.path.join(IMG_DIR, "parts.png"))
+    clear_render_objects()
+
+    # joint close-up: sectioned, exploded (left) and engaged (right)
+    bpy.context.scene.render.resolution_x = 1600
+    bpy.context.scene.render.resolution_y = 900
+    j_open = build_joint(gap=10)
+    j_closed = build_joint(gap=0)
+    objs = [copy_obj(j_open, "j_open", 0, 0, 0, BLUE_B), copy_obj(j_closed, "j_closed", post + 30, 0, 0, BLUE_B)]
+    j_open.hide_render = True
+    j_closed.hide_render = True
+    camera_look(objs, (0.25, -1.0, 0.45), lens=70)
+    render(os.path.join(IMG_DIR, "joint.png"))
 
 
 if __name__ == "__main__":
