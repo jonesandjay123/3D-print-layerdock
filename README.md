@@ -54,6 +54,8 @@ Xbox Series S 直立時是 63.5（寬）× 151（深）× 275（高）mm。151 m
 
 ## 各零件
 
+已切好的 Bambu Studio 專案檔在 [`print/`](print/)（A1 mini、Bambu PLA Basic、0.20 mm Standard、紋理 PEI、socket_fit 0.25），直接開啟按 Print。要印第 N 層就再開一次 `print/layer.3mf`。
+
 ![零件圖（即列印方向）](docs/images/parts.png)
 
 | 零件 | 檔案 | 數量 | 說明 |
@@ -96,7 +98,7 @@ Xbox Series S 直立時是 63.5（寬）× 151（深）× 275（高）mm。151 m
 
 ### 尚未做（需要實體測試）
 
-- **方榫手感**：第一版試件已測，PLA 下 0.25 mm 間隙剛好；Base + Layer 實際堆疊尚未測。
+- **方榫手感**：PLA 下 0.25 mm 間隙剛好（試件）；Base + Layer 實際堆疊 2026-10-20 已測，壓合正常。
 - **壓合肋**是否如預期被擠扁而不是把孔撐裂（4.35 mm 孔壁，應該不會）。
 - 大平板的翹曲：切片無法預測，看第一片 Base。
 - 長期蠕變：PETG 在 1 kg 靜載下不會有問題，但沒有實測。
