@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Slice every STL in stl/ with the locally installed Bambu Studio (CLI mode) using
+Slice every STL in <project>/stl/ with the locally installed Bambu Studio (CLI mode) using
 the stock "Bambu Lab A1 mini 0.4 nozzle" + "0.20mm Standard @BBL A1M" +
 "Bambu PLA Basic" profiles, then write docs/print-report.md with print time,
 filament, brim, and the real footprint of everything the nozzle touches.
@@ -9,7 +9,12 @@ Nothing is printed and nothing is sent to a printer; this is a dry run of the
 slicer.  Bambu's profile JSONs inherit from each other, so they are flattened
 into build/profiles/ first (that folder is git-ignored).
 
-Usage: tools/slice.py [--app /Applications/BambuStudio.app] [--plate "Textured PEI Plate"] [--filament "Bambu PETG Basic @BBL A1M 0.4 nozzle"]
+Shared by every project in projects/: <project> is --project DIR (default: the
+current directory).  Output goes to <project>/build/slice/<part>/ (git-ignored)
+and the summary to <project>/docs/print-report.md.
+
+Usage: tools/slice.py [--project DIR] [--only part[,part]] [--app /Applications/BambuStudio.app]
+                      [--plate "Textured PEI Plate"] [--filament "Bambu PETG Basic @BBL A1M 0.4 nozzle"]
 """
 import json
 import os
@@ -18,7 +23,7 @@ import shutil
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.getcwd()  # overridden by --project
 BUILD = os.path.join(ROOT, "build")
 APP = "/Applications/BambuStudio.app"
 MACHINE = "Bambu Lab A1 mini 0.4 nozzle"
@@ -80,7 +85,12 @@ def gcode_stats(path):
 
 
 def main():
+    global ROOT, BUILD
     args = sys.argv[1:]
+    if "--project" in args:
+        ROOT = os.path.abspath(args[args.index("--project") + 1])
+        BUILD = os.path.join(ROOT, "build")
+    only = args[args.index("--only") + 1].split(",") if "--only" in args else None
     app = APP
     plate = "Textured PEI Plate"
     if "--app" in args:
@@ -107,6 +117,8 @@ def main():
             json.dump(d, f, indent=1)
 
     stls = sorted(f for f in os.listdir(os.path.join(ROOT, "stl")) if f.endswith(".stl"))
+    if only:
+        stls = [f for f in stls if f[:-4] in only]
     rows = []
     for stl in stls:
         name = stl[:-4]
@@ -133,6 +145,9 @@ def main():
         print(f"  {st.get('time')}  {st.get('grams')} g  brim={'yes' if st['brim'] else 'no'}  toolpath XY {fp}")
 
     report = os.path.join(ROOT, "docs", "print-report.md")
+    if only:  # a partial run must not overwrite the full report
+        report = os.path.join(BUILD, "print-report-partial.md")
+    os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as f:
         f.write("# Slicing dry run (Bambu Studio CLI)\n\n")
         f.write(f"Printer profile `{MACHINE}`, process `{PROCESS}`, filament `{FILAMENT}`, plate `{plate}`.\n")

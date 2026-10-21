@@ -7,6 +7,7 @@
 #   --slice       also run tools/slice.py (needs Bambu Studio installed)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+REPO="$(cd ../.. && pwd)"   # shared tools live in <repo>/tools
 mkdir -p build
 
 BLENDER="${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}"
@@ -37,9 +38,9 @@ echo "== Blender build"
 grep -E 'layerdock|wrote|bbox|WARNING' build/blender.log
 
 echo "== STL check"
-python3 tools/check_stl.py
+python3 "$REPO/tools/check_stl.py" --project .
 
 if [ "$SLICE" = 1 ]; then
   echo "== Bambu Studio slice dry run"
-  python3 tools/slice.py
+  python3 "$REPO/tools/slice.py" --project .
 fi

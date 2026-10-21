@@ -4,7 +4,10 @@ Check every STL in stl/: binary format, watertight (every edge shared by exactly
 two triangles with opposite winding), positive volume, bounding box within the
 printer bed.  Pure Python, no dependencies.
 
-Usage: tools/check_stl.py [--bed 180] [files...]
+Shared by every project in projects/.  With no file arguments it checks
+<project>/stl/*.stl, where <project> is --project DIR or the current directory.
+
+Usage: tools/check_stl.py [--project DIR] [--bed 180] [files...]
 Exit code 1 if any file fails.
 """
 import glob
@@ -12,7 +15,15 @@ import os
 import struct
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def project_dir(args):
+    """Pop --project DIR from args; default is the current directory."""
+    if "--project" in args:
+        i = args.index("--project")
+        d = os.path.abspath(args[i + 1])
+        del args[i:i + 2]
+        return d
+    return os.getcwd()
 
 
 def read_stl(path):
@@ -76,12 +87,16 @@ def analyse(tris):
 
 def main():
     args = sys.argv[1:]
+    root = project_dir(args)
     bed = 180.0
     if "--bed" in args:
         i = args.index("--bed")
         bed = float(args[i + 1])
         del args[i:i + 2]
-    files = args or sorted(glob.glob(os.path.join(ROOT, "stl", "*.stl")))
+    files = args or sorted(glob.glob(os.path.join(root, "stl", "*.stl")))
+    if not files:
+        print(f"no STL files found under {os.path.join(root, 'stl')}")
+        sys.exit(1)
     ok = True
     print(f"{'file':18s} {'tris':>6s} {'bad edges':>9s} {'volume cm3':>10s} {'area cm2':>9s}  size (mm)")
     for path in files:

@@ -19,10 +19,9 @@ import shutil
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check_stl import analyse, read_stl  # noqa: E402
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "..", "..", "tools"))  # shared tools in <repo>/tools
+from check_stl import analyse, read_stl  # noqa: E402
 PARTS = {"base": "base", "layer": "layer", "top": "top", "test": "test-coupon"}
 CANDIDATES = ["/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD", "openscad", "openscad-nightly"]
 
