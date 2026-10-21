@@ -16,7 +16,7 @@ Process overrides: `wall_loops=3`, `elefant_foot_compensation=0.15`. Generated b
 | --- | --- | --- | --- | --- | --- | --- |
 | bin | 4h 3m 6s | 255.31 g (84.2 m) | 624 | no (auto_brim) | 165.6 × 171.6 | yes |
 | lid | 1h 48m 23s | 105.13 g (34.7 m) | 41 | no (auto_brim) | 165.6 × 171.6 | yes |
-| test-coupon | 54m 50s | 39.87 g (13.2 m) | 94 | no (auto_brim) | 107.6 × 91.6 | yes |
+| test-coupon | 57m 27s | 40.08 g (13.3 m) | 94 | no (auto_brim) | 107.6 × 91.6 | yes |
 
 Profile values used: walls 3, infill 15%, supports off.
 
