@@ -81,6 +81,9 @@ test_d = 42;
 test_r = 8;
 test_h = 14;
 test_fits = [0.20, 0.25, 0.30];
+// Engraved labels: text height and depth ("0.20" etc. on the groove side of each mini lid, "BIN" on the mini bin's floor)
+test_text_size = 7;
+test_text_depth = 0.6;
 
 /* [Preview only] */
 // Tissue box drawn as a wireframe on the lid in the assembly preview
@@ -186,13 +189,18 @@ module groove_fit(w, d, r, f) {
 module lid() { lid_body(bin_w, bin_d, corner_r, fit); }
 
 // ---- Fit test coupon: one mini bin + a mini lid per fit, 1/2/3 notches on the front face
+module engrave(txt, cx, cy, z_top) {  // text readable from +z, cut test_text_depth down from z_top
+    translate([cx, cy, z_top - test_text_depth]) linear_extrude(test_text_depth + 1)
+        text(txt, size = test_text_size, halign = "center", valign = "center");
+}
 module test() {
-    bin_body(test_w, test_d, test_r, test_h);
+    difference() { bin_body(test_w, test_d, test_r, test_h); engrave("BIN", test_w / 2, test_d / 2, floor_t); }
     for (i = [0 : len(test_fits) - 1])   // 2 × 2 grid: bin front-left, lids 1 / 2 / 3 clockwise
         translate([(i + 1) % 2 * (test_w + 8), floor((i + 1) / 2) * (test_d + 8), 0]) difference() {
             lid_body(test_w, test_d, test_r, test_fits[i]);
             for (k = [0 : i])
                 translate([test_w / 2 + (k - i / 2) * 3 - 0.5, -1, -1]) cube([1.0, 0.5 + 1, lid_h + 2]);
+            engrave(str(test_fits[i]), test_w / 2, test_d / 2, lid_h);
         }
 }
 

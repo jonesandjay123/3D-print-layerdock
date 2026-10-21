@@ -255,15 +255,47 @@ def build_lid():
     return lid_body(bin_w, bin_d, corner_r, fit)
 
 
+def text_cutter(text, cx, cy, z_top, size, depth):
+    """Extruded text (readable from +z) whose top is at z_top, going `depth` down: subtract it to engrave."""
+    cu = bpy.data.curves.new("txt", type="FONT")
+    cu.body = text
+    cu.size = size
+    cu.align_x = "CENTER"
+    cu.align_y = "CENTER"
+    cu.extrude = depth / 2 + 0.5
+    ob = bpy.data.objects.new("txt", cu)
+    bpy.context.scene.collection.objects.link(ob)
+    bpy.ops.object.select_all(action="DESELECT")
+    ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.convert(target="MESH")
+    ob = bpy.context.view_layer.objects.active
+    e = depth / 2 + 0.5                     # converted mesh spans z in [-e, e]
+    transform_verts(ob, lambda v: (v.x + cx, v.y + cy, v.z + z_top - depth + e))  # -> [z_top - depth, z_top + 1]
+    clean(ob)
+    if volume(ob) < 0:
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        bm.to_mesh(ob.data)
+        bm.free()
+    return ob
+
+
 def build_test():
     tw, td, tr, th = D("test_w"), D("test_d"), D("test_r"), D("test_h")
-    parts = [bin_body(tw, td, tr, th, "test-bin")]
+    ts, tdp = D("test_text_size"), D("test_text_depth")
+    mini = bin_body(tw, td, tr, th, "test-bin")
+    difference(mini, [text_cutter("BIN", tw / 2, td / 2, floor_t, ts, tdp)])  # on the floor, read from above
+    parts = [mini]
     for i, f in enumerate(D("test_fits")):
         cap = lid_body(tw, td, tr, f, f"test-lid{i}")
         x0, y0 = (i + 1) % 2 * (tw + 8), ((i + 1) // 2) * (td + 8)   # 2 × 2 grid, same as the .scad
         transform_verts(cap, lambda v, x0=x0, y0=y0: (v.x + x0, v.y + y0, v.z))
         notches = [box(x0 + tw / 2 + (k - i / 2) * 3 - 0.5, y0 - 1, -1, 1.0, 1.5, lid_h + 2) for k in range(i + 1)]
-        difference(cap, notches)
+        # the fit value engraved on the groove side (printed top surface), read from above
+        label = text_cutter(f"{f:.2f}", x0 + tw / 2, y0 + td / 2, lid_h, ts, tdp)
+        difference(cap, notches + [label])
         parts.append(cap)
     ob = join(parts, "test-coupon")
     clean(ob)
