@@ -54,8 +54,8 @@ lip_h = 5;
 lip_t = 1.0;
 // Chamfer on the lip's top edges (lead-in)
 lip_chamfer = 0.4;
-// Horizontal clearance between lip and groove, per side.  Coupon test 2026-10-21 (PLA): 0.20 was the tightest of 0.20/0.25/0.30 and still felt a little loose, so 0.20.
-fit = 0.20;
+// Horizontal clearance between lip and groove, per side.  Coupon test 2026-10-21 (PLA): 0.20 was the tightest of 0.20/0.25/0.30 and still felt a little loose; Jones chose to go one step tighter (0.15, untested on the coupon).
+fit = 0.15;
 // Vertical clearance between lip top and groove ceiling
 groove_extra = 0.25;
 // Thickness of the outer skirt below the groove (this ring carries the stack)

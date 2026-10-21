@@ -5,8 +5,8 @@ Process overrides: `wall_loops=3`, `elefant_foot_compensation=0.15`. Generated b
 
 | part | print time | filament | layers | brim generated | toolpath footprint on bed (mm) | fits 180 × 180 |
 | --- | --- | --- | --- | --- | --- | --- |
-| bin | 4h 4m 21s | 255.13 g (84.2 m) | 624 | no (auto_brim) | 165.6 × 171.6 | yes |
-| lid | 1h 48m 23s | 105.22 g (34.7 m) | 41 | no (auto_brim) | 165.6 × 171.6 | yes |
-| test-coupon | 57m 22s | 40.04 g (13.2 m) | 94 | no (auto_brim) | 107.6 × 91.6 | yes |
+| bin | 4h 2m 52s | 254.95 g (84.1 m) | 624 | no (auto_brim) | 165.6 × 171.6 | yes |
+| lid | 1h 48m 17s | 105.32 g (34.8 m) | 41 | no (auto_brim) | 165.6 × 171.6 | yes |
+| test-coupon | 57m 34s | 40.0 g (13.2 m) | 94 | no (auto_brim) | 107.6 × 91.6 | yes |
 
 Profile values used: walls 3, infill 15%, supports off.
