@@ -75,6 +75,13 @@ foot_h = groove_depth + D("foot_extra")
 lid_h = groove_depth + D("lid_t")
 hole_off = 6.0
 rim_zone = D("rim_zone")
+hood_h, cover_depth, tray_h = D("hood_h"), D("cover_depth"), D("tray_h")
+tray_wall, tray_floor, tray_fit = D("tray_wall"), D("tray_floor"), D("tray_fit")
+ledge_w, ledge_h, tray_front_r = D("ledge_w"), D("ledge_h"), D("tray_front_r")
+ledge_z = hood_h - tray_h
+tray_w = bin_w - 2 * wall - 2 * tray_fit
+tray_d = cover_depth - wall - tray_fit
+tray_back_r = corner_r - wall - tray_fit
 N_BINS = int(D("bins"))
 
 
@@ -179,35 +186,41 @@ def volume(ob):
 
 # --------------------------------------------------------------------- rounded-rectangle sweep (twin of rrect/prism/loft in the .scad)
 def rounded_loop(w, d, r, off, z):
-    """Counter-clockwise outline of a w × d rounded rectangle (corner radius r) offset inward by
-    `off`, at height z.  The arc centres never move; only the radius shrinks, exactly like
-    OpenSCAD's offset()."""
-    rr = r - off
-    assert rr > 1e-6, f"offset {off} >= corner radius {r}"
-    centres = [(w - r, d - r, 0.0), (r, d - r, 90.0), (r, r, 180.0), (w - r, r, 270.0)]
+    """Counter-clockwise outline of a w × d rounded rectangle offset inward by `off`, at height z.
+    `r` is one corner radius or four (back-right, back-left, front-left, front-right; y = 0 is
+    the front).  The arc centres never move; only the radius shrinks, exactly like OpenSCAD's
+    offset()."""
+    radii = list(r) if isinstance(r, (list, tuple)) else [r] * 4
+    centres = [(w - radii[0], d - radii[0], 0.0), (radii[1], d - radii[1], 90.0),
+               (radii[2], radii[2], 180.0), (w - radii[3], radii[3], 270.0)]
     pts = []
-    for cx, cy, a0 in centres:
+    for (cx, cy, a0), ri in zip(centres, radii):
+        rr = ri - off
+        assert rr > 1e-6, f"offset {off} >= corner radius {ri}"
         for k in range(N_ARC + 1):
             a = math.radians(a0 + 90.0 * k / N_ARC)
             pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a), z))
     return pts
 
 
-def sweep(name, w, d, r, profile):
-    """Sweep an OPEN wall profile [(off, z), ...] around the outline.  The two ends of the
-    profile must have the same offset (the floor hole boundary); each end loop is capped
-    with one n-gon, which closes the solid.  Returns a watertight object."""
+def sweep(name, w, d, r, profile, closed=False):
+    """Sweep a wall profile [(off, z), ...] around the outline.  Open profile (default): its two
+    ends must have the same offset (the floor hole boundary) and each end loop is capped with one
+    n-gon.  Closed profile: the last loop connects back to the first (a ring with no floor).
+    Returns a watertight object."""
     loops = [rounded_loop(w, d, r, off, z) for off, z in profile]
     n = len(loops[0])
     verts = [p for loop in loops for p in loop]
     faces = []
-    for i in range(len(loops) - 1):
-        a, b = i * n, (i + 1) * n
+    m = len(loops) if closed else len(loops) - 1
+    for i in range(m):
+        a, b = i * n, ((i + 1) % len(loops)) * n
         for j in range(n):
             k = (j + 1) % n
             faces.append((a + j, a + k, b + k, b + j))
-    faces.append(tuple(range(0, n)))                               # cap at the first loop
-    faces.append(tuple(range((len(loops) - 1) * n, len(loops) * n)))  # cap at the last loop
+    if not closed:
+        faces.append(tuple(range(0, n)))                               # cap at the first loop
+        faces.append(tuple(range((len(loops) - 1) * n, len(loops) * n)))  # cap at the last loop
     ob = mesh_obj(name, verts, faces)
     clean(ob)
     if volume(ob) < 0:  # make normals point outward
@@ -249,6 +262,25 @@ def lid_body(w, d, r, f, name="lid"):
 
 def build_bin():
     return bin_body(bin_w, bin_d, corner_r, bin_h)
+
+
+def build_hood():
+    """Three walls + the bottom groove ring, open at the front above the ring, inner ledge for the tray."""
+    prof = [(sc, 0), (0, sc), (0, hood_h - sc), (sc, hood_h), (wall, hood_h),
+            (wall, ledge_z), (wall + ledge_w, ledge_z), (wall + ledge_w, ledge_z - ledge_h),
+            (wall, ledge_z - ledge_h - ledge_w),                          # 45° under the ledge
+            (wall, foot_h), (bottom_t, foot_h), (bottom_t, 0)] + groove_profile(fit)
+    ob = sweep("hood", bin_w, bin_d, corner_r, prof, closed=True)
+    difference(ob, [box(-1, -1, foot_h, bin_w + 2, bin_d - cover_depth + 1, hood_h + 2)])  # open front
+    clean(ob)
+    return ob
+
+
+def build_tray():
+    radii = (tray_back_r, tray_back_r, tray_front_r, tray_front_r)
+    ho = tray_wall + 0.3
+    prof = [(ho, 0), (0, 0), (0, tray_h), (tray_wall, tray_h), (tray_wall, tray_floor), (ho, tray_floor)]
+    return sweep("tray", tray_w, tray_d, radii, prof)
 
 
 def build_lid():
@@ -437,12 +469,17 @@ ORANGE = (0.95, 0.60, 0.20, 1)
 GHOST = (0.25, 0.55, 0.30, 1)
 
 
-def place_stack(parts, gap=0.0, ghost=True, alternate=False):
+def place_stack(parts, gap=0.0, ghost=True, alternate=False, top="hood"):
     objs = []
     for i in range(N_BINS):
         col = IVORY_B if (alternate and i % 2) else IVORY
         objs.append(copy_obj(parts["bin"], f"a_bin{i}", 0, 0, i * (bin_h + gap), col))
     z_lid = N_BINS * bin_h + N_BINS * gap
+    if top == "hood":
+        objs.append(copy_obj(parts["hood"], "a_hood", 0, 0, z_lid, IVORY))
+        objs.append(copy_obj(parts["tray"], "a_tray", wall + tray_fit, bin_d - cover_depth, z_lid + ledge_z + gap,
+                             IVORY_B if alternate else IVORY))
+        return objs
     objs.append(copy_obj(parts["lid"], "a_lid", 0, 0, z_lid, IVORY, flip=True))
     if ghost:
         tw, td, th = D("tissue_w"), D("tissue_d"), D("tissue_h")
@@ -493,7 +530,7 @@ def main():
     if bin_h + lip_h > 180:
         print("WARNING: bin taller than 180 mm")
 
-    parts = {"bin": build_bin(), "lid": build_lid(), "test": build_test()}
+    parts = {"bin": build_bin(), "lid": build_lid(), "hood": build_hood(), "tray": build_tray(), "test": build_test()}
     for name, ob in parts.items():
         export_stl(ob, {"test": "test-coupon"}.get(name, name) + ".stl")
         lo, hi = bbox(ob)
@@ -507,21 +544,31 @@ def main():
     for ob in parts.values():
         ob.hide_render = True
 
-    objs = place_stack(parts, gap=0, ghost=True)
+    objs = place_stack(parts, gap=0, top="hood")
     camera_look(objs, (-1.0, -1.5, 0.55))
     render(os.path.join(IMG_DIR, "assembly.png"))
     clear_render_objects()
 
-    objs = place_stack(parts, gap=45, ghost=False, alternate=True)
+    objs = place_stack(parts, gap=0, top="hood")
+    camera_look(objs, (0.9, -1.3, 0.9))
+    render(os.path.join(IMG_DIR, "assembly-top.png"))
+    clear_render_objects()
+
+    objs = place_stack(parts, gap=0, ghost=True, top="lid")
+    camera_look(objs, (-1.0, -1.5, 0.55))
+    render(os.path.join(IMG_DIR, "assembly-lid.png"))
+    clear_render_objects()
+
+    objs = place_stack(parts, gap=45, alternate=True, top="hood")
     camera_look(objs, (-1.0, -1.5, 0.5))
     render(os.path.join(IMG_DIR, "exploded.png"))
     clear_render_objects()
 
-    bpy.context.scene.render.resolution_x = 1800
+    bpy.context.scene.render.resolution_x = 2200
     bpy.context.scene.render.resolution_y = 800
     x = 0
     objs = []
-    for name, col in (("bin", IVORY), ("lid", IVORY), ("test", ORANGE)):
+    for name, col in (("bin", IVORY), ("lid", IVORY), ("hood", IVORY), ("tray", IVORY), ("test", ORANGE)):
         ob = parts[name]
         lo, hi = bbox(ob)
         objs.append(copy_obj(ob, f"p_{name}", x - lo[0], -lo[1], -lo[2], col))

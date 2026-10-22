@@ -27,7 +27,7 @@
 
 /* [Output] */
 // Which part to render
-part = "assembly"; // [assembly, bin, lid, test, joint]
+part = "assembly"; // [assembly, assembly_lid, bin, lid, hood, tray, test, joint]
 // Number of bins in the assembly preview
 bins = 3;
 
@@ -75,6 +75,23 @@ lid_t = 3.0;
 // Chamfer on the lid's top outer edge
 lid_edge_chamfer = 1.0;
 
+/* [Hood + Tray top: alternative to the flat lid, for the tissue use case] */
+// Height of the hood above the bin rim (tray rim top is flush with this)
+hood_h = 60;
+// How much of the depth (measured from the back) the hood covers; the front (bin_d - cover_depth) stays open from above
+cover_depth = 96;
+// Total tray height (floor + rim); the space for pulling tissues under the tray is hood_h - tray_h
+tray_h = 15;
+tray_wall = 1.6;
+tray_floor = 2.0;
+// Clearance between tray and hood, per side
+tray_fit = 0.3;
+// Ledge inside the hood that carries the tray: width (inward) and height
+ledge_w = 2.5;
+ledge_h = 3;
+// Radius of the tray's two front corners (its back corners follow the hood)
+tray_front_r = 2.0;
+
 /* [Fit test coupon: a mini bin + three mini lids with different fits] */
 test_w = 50;
 test_d = 42;
@@ -99,6 +116,10 @@ bottom_t = skirt_t + groove_w + foot_t;     // 4.2: wall thickness at the very b
 foot_h = groove_depth + foot_extra;         // 6.05
 lid_h = groove_depth + lid_t;               // 8.25
 hole_off = 6;                               // where the swept wall profile stops and the flat floor begins (< corner_r)
+ledge_z = hood_h - tray_h;                  // tray floor sits here; tissue space under the tray = ledge_z
+tray_w = bin_w - 2 * wall - 2 * tray_fit;
+tray_d = cover_depth - wall - tray_fit;     // front face of the tray is flush with the ends of the hood's side walls
+tray_back_r = corner_r - wall - tray_fit;
 tiny = 0.01;
 $fn = 64;
 
@@ -188,6 +209,39 @@ module groove_fit(w, d, r, f) {
 }
 module lid() { lid_body(bin_w, bin_d, corner_r, fit); }
 
+// ---- Hood: three walls + bottom groove ring, open at the front, with an inner ledge for the tray
+module hood() {
+    w = bin_w; d = bin_d; r = corner_r; sc = seam_chamfer;
+    difference() {
+        union() {
+            loft(w, d, r, sc, 0, 0, sc);
+            prism(w, d, r, 0, sc, hood_h - sc);
+            loft(w, d, r, 0, hood_h - sc, sc, hood_h);
+        }
+        prism(w, d, r, wall, ledge_z, hood_h + 1);                                   // above the ledge
+        prism(w, d, r, wall + ledge_w, foot_h, ledge_z + tiny);                      // inside the ledge band
+        loft(w, d, r, wall, foot_h, wall, ledge_z - ledge_h - ledge_w);              // main cavity
+        loft(w, d, r, wall, ledge_z - ledge_h - ledge_w, wall + ledge_w, ledge_z - ledge_h + tiny);  // 45° under the ledge
+        prism(w, d, r, bottom_t, -1, foot_h + tiny);                                 // inside the foot ring
+        groove(w, d, r);
+        translate([-1, -1, foot_h]) cube([w + 2, d - cover_depth + 1, hood_h + 2]); // open front (the bottom ring stays)
+    }
+}
+// ---- Tray: drops into the hood from above and rests on the ledge
+module tray() {
+    module rr2(off) {  // rounded rect with different back / front corner radii
+        hull() {
+            for (x = [tray_back_r, tray_w - tray_back_r]) translate([x, tray_d - tray_back_r]) circle(r = tray_back_r - off);
+            for (x = [tray_front_r, tray_w - tray_front_r]) translate([x, tray_front_r]) circle(r = tray_front_r - off);
+        }
+    }
+    difference() {
+        linear_extrude(tray_h) rr2(0);
+        translate([0, 0, tray_floor]) linear_extrude(tray_h) rr2(tray_wall);
+    }
+}
+module tray_in_hood(z) { translate([wall + tray_fit, bin_d - cover_depth, z + ledge_z]) tray(); }
+
 // ---- Fit test coupon: one mini bin + a mini lid per fit, 1/2/3 notches on the front face
 module engrave(txt, cx, cy, z_top) {  // text readable from +z, cut test_text_depth down from z_top
     translate([cx, cy, z_top - test_text_depth]) linear_extrude(test_text_depth + 1)
@@ -208,7 +262,12 @@ module test() {
 module lid_in_use(z) {  // flipped from print orientation onto the top of the stack
     translate([0, bin_d, z + lid_h]) rotate([180, 0, 0]) lid();
 }
-module assembly(gap = 0) {
+module assembly(gap = 0) {  // hood + tray on top (default)
+    for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
+    translate([0, 0, bins * bin_h + bins * gap]) hood();
+    tray_in_hood(bins * bin_h + (bins + 1) * gap);
+}
+module assembly_lid(gap = 0) {  // flat lid on top
     for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
     lid_in_use(bins * bin_h + bins * gap);
     %translate([(bin_w - tissue_w) / 2, (bin_d - tissue_d) / 2, bins * bin_h + lid_h + bins * gap]) cube([tissue_w, tissue_d, tissue_h]);
@@ -222,7 +281,10 @@ module joint(gap = 0) {
 }
 
 if (part == "assembly") assembly();
+else if (part == "assembly_lid") assembly_lid();
 else if (part == "bin") bin();
 else if (part == "lid") lid();
+else if (part == "hood") hood();
+else if (part == "tray") tray();
 else if (part == "test") test();
 else if (part == "joint") joint(10);
