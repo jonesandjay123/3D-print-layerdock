@@ -27,7 +27,7 @@
 
 /* [Output] */
 // Which part to render
-part = "assembly"; // [assembly, assembly_lid, bin, lid, hood, tray, test, joint]
+part = "assembly"; // [assembly, assembly_lid, bin, lid, hood, tray, roof, test, joint]
 // Number of bins in the assembly preview
 bins = 3;
 
@@ -75,13 +75,22 @@ lid_t = 3.0;
 // Chamfer on the lid's top outer edge
 lid_edge_chamfer = 1.0;
 
-/* [Hood + Tray top: alternative to the flat lid, for the tissue use case] */
-// Height of the hood above the bin rim (tray rim top is flush with this)
-hood_h = 60;
+/* [Hood + Tray + Roof top: alternative to the flat lid, for the tissue use case] */
+// Height of the hood's rim above the bin rim (tray rim top is flush with this)
+hood_h = 72;
 // How much of the depth (measured from the back) the hood covers; the front (bin_d - cover_depth) stays open from above
-cover_depth = 96;
-// Total tray height (floor + rim); the space for pulling tissues under the tray is hood_h - tray_h
-tray_h = 15;
+cover_depth = 115;
+// Total tray height (floor + rim); the space for pulling tissues under the tray is hood_h - tray_h (30)
+tray_h = 42;
+// Curved roof over the tray: height of its front edge and of its back end above the hood rim, how far
+// its front edge sits back from the hood's open front, plate thickness.  The roof drops into a rebate
+// along the side and back walls: the outer roof_lip of the wall stays at full height, the rest is roof_t lower.
+roof_front_h = 12;
+roof_back_h = 36;
+roof_setback = 22;
+roof_t = 3.0;
+roof_lip = 1.0;
+roof_fit = 0.3;
 tray_wall = 1.6;
 tray_floor = 2.0;
 // Clearance between tray and hood, per side
@@ -120,6 +129,12 @@ ledge_z = hood_h - tray_h;                  // tray floor sits here; tissue spac
 tray_w = bin_w - 2 * wall - 2 * tray_fit;
 tray_d = cover_depth - wall - tray_fit;     // front face of the tray is flush with the ends of the hood's side walls
 tray_back_r = corner_r - wall - tray_fit;
+roof_y0 = bin_d - cover_depth + roof_setback;   // y of the roof's front edge
+roof_yc = bin_d - roof_lip - roof_fit;          // back end of the roof (inside the back wall's lip)
+roof_a = roof_yc - roof_y0;                     // ellipse semi-axes of the roof curve
+roof_b = roof_back_h - roof_front_h;
+// outer curve of the roof, front (vertical tangent) to back (horizontal tangent), relative to the hood rim
+function roof_curve(dz = 0) = [for (k = [0 : 30]) [roof_yc - roof_a * cos(k * 3), roof_front_h + dz + roof_b * sin(k * 3)]];
 tiny = 0.01;
 $fn = 64;
 
@@ -209,24 +224,45 @@ module groove_fit(w, d, r, f) {
 }
 module lid() { lid_body(bin_w, bin_d, corner_r, fit); }
 
-// ---- Hood: three walls + bottom groove ring, open at the front, with an inner ledge for the tray
+// ---- Hood: three walls + bottom groove ring, open at the front, inner ledge for the tray,
+//      side and back walls rising above the rim under the roof curve
+module yz_prism(pts, x0, x1) { translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) polygon(pts); }
 module hood() {
     w = bin_w; d = bin_d; r = corner_r; sc = seam_chamfer;
+    h = hood_h + roof_back_h;
     difference() {
         union() {
             loft(w, d, r, sc, 0, 0, sc);
-            prism(w, d, r, 0, sc, hood_h - sc);
-            loft(w, d, r, 0, hood_h - sc, sc, hood_h);
+            prism(w, d, r, 0, sc, h);
         }
-        prism(w, d, r, wall, ledge_z, hood_h + 1);                                   // above the ledge
+        prism(w, d, r, wall, ledge_z, h + 1);                                        // above the ledge
         prism(w, d, r, wall + ledge_w, foot_h, ledge_z + tiny);                      // inside the ledge band
         loft(w, d, r, wall, foot_h, wall, ledge_z - ledge_h - ledge_w);              // main cavity
         loft(w, d, r, wall, ledge_z - ledge_h - ledge_w, wall + ledge_w, ledge_z - ledge_h + tiny);  // 45° under the ledge
         prism(w, d, r, bottom_t, -1, foot_h + tiny);                                 // inside the foot ring
         groove(w, d, r);
-        translate([-1, -1, foot_h]) cube([w + 2, d - cover_depth + 1, hood_h + 2]); // open front (the bottom ring stays)
+        translate([-1, -1, foot_h]) cube([w + 2, d - cover_depth + 1, h + 2]);      // open front (the bottom ring stays)
+        // everything above the roof curve; in front of the roof the walls stop at the rim (hood_h)
+        yz_prism(concat([[-10, hood_h], [roof_y0, hood_h]],
+                        [for (p = roof_curve()) [p[0], p[1] + hood_h]],
+                        [[d + 10, hood_h + roof_back_h], [d + 10, 400], [-10, 400]]), -1, w + 1);
+        // rebate for the roof: inside the outer lip the wall top is roof_t lower
+        intersection() {
+            yz_prism(concat([[roof_y0 - roof_fit, hood_h + roof_front_h - roof_t]],
+                            [for (p = roof_curve(-roof_t)) [p[0], p[1] + hood_h]],
+                            [[d + 10, hood_h + roof_back_h - roof_t], [d + 10, 400], [roof_y0 - roof_fit, 400]]), -1, w + 1);
+            prism(w, d, r, roof_lip, hood_h, 500);
+        }
     }
 }
+// ---- Roof: curved plate that drops into the rebate along the hood's side and back walls.
+//      Modelled in use orientation; roof() rotates it onto its side for printing (use a brim).
+module roof_in_use() {
+    outer = roof_curve();
+    inner = roof_curve(-roof_t);
+    yz_prism(concat(outer, [for (i = [len(inner) - 1 : -1 : 0]) inner[i]]), roof_lip + roof_fit, bin_w - roof_lip - roof_fit);
+}
+module roof() { translate([0, 0, bin_w - roof_lip - roof_fit]) rotate([0, 90, 0]) translate([0, -roof_y0, -(roof_front_h - roof_t)]) roof_in_use(); }
 // ---- Tray: drops into the hood from above and rests on the ledge
 module tray() {
     module rr2(off) {  // rounded rect with different back / front corner radii
@@ -262,10 +298,11 @@ module test() {
 module lid_in_use(z) {  // flipped from print orientation onto the top of the stack
     translate([0, bin_d, z + lid_h]) rotate([180, 0, 0]) lid();
 }
-module assembly(gap = 0) {  // hood + tray on top (default)
+module assembly(gap = 0) {  // hood + tray + roof on top (default)
     for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
     translate([0, 0, bins * bin_h + bins * gap]) hood();
     tray_in_hood(bins * bin_h + (bins + 1) * gap);
+    translate([0, 0, bins * bin_h + hood_h + (bins + 2) * gap]) roof_in_use();
 }
 module assembly_lid(gap = 0) {  // flat lid on top
     for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
@@ -286,5 +323,6 @@ else if (part == "bin") bin();
 else if (part == "lid") lid();
 else if (part == "hood") hood();
 else if (part == "tray") tray();
+else if (part == "roof") roof();
 else if (part == "test") test();
 else if (part == "joint") joint(10);

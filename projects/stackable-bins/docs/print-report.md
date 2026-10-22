@@ -6,9 +6,10 @@ Process overrides: `wall_loops=3`, `elefant_foot_compensation=0.15`. Generated b
 | part | print time | filament | layers | brim generated | toolpath footprint on bed (mm) | fits 180 × 180 |
 | --- | --- | --- | --- | --- | --- | --- |
 | bin | 4h 2m 52s | 254.95 g (84.1 m) | 624 | no (auto_brim) | 165.6 × 171.6 | yes |
-| hood | 1h 4m 52s | 61.47 g (20.3 m) | 300 | no (auto_brim) | 165.6 × 171.6 | yes |
+| hood | 1h 46m 0s | 103.75 g (34.2 m) | 540 | no (auto_brim) | 165.6 × 171.6 | yes |
 | lid | 1h 48m 17s | 105.32 g (34.8 m) | 41 | no (auto_brim) | 165.6 × 171.6 | yes |
+| roof | 1h 36m 49s | 55.18 g (18.2 m) | 817 | yes (outer_only, 8 mm, set by hand) | 41.3 × 106.0 | yes |
 | test-coupon | 57m 34s | 40.0 g (13.2 m) | 94 | no (auto_brim) | 107.6 × 91.6 | yes |
-| tray | 49m 54s | 45.2 g (14.9 m) | 75 | no (auto_brim) | 161.0 × 93.3 | yes |
+| tray | 1h 20m 33s | 80.64 g (26.6 m) | 210 | no (auto_brim) | 161.0 × 112.3 | yes |
 
 Profile values used: walls 3, infill 15%, supports off.

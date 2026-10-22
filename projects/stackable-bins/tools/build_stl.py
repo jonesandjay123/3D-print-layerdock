@@ -82,6 +82,18 @@ ledge_z = hood_h - tray_h
 tray_w = bin_w - 2 * wall - 2 * tray_fit
 tray_d = cover_depth - wall - tray_fit
 tray_back_r = corner_r - wall - tray_fit
+roof_front_h, roof_back_h, roof_setback = D("roof_front_h"), D("roof_back_h"), D("roof_setback")
+roof_t, roof_lip, roof_fit = D("roof_t"), D("roof_lip"), D("roof_fit")
+roof_y0 = bin_d - cover_depth + roof_setback
+roof_yc = bin_d - roof_lip - roof_fit          # back end of the roof (inside the back wall's lip)
+roof_a = roof_yc - roof_y0
+roof_b = roof_back_h - roof_front_h
+
+
+def roof_curve(dz=0.0):
+    """Outer curve of the roof, front (vertical tangent) to back (horizontal tangent), z relative to the hood rim."""
+    return [(roof_yc - roof_a * math.cos(math.radians(k * 3)), roof_front_h + dz + roof_b * math.sin(math.radians(k * 3)))
+            for k in range(31)]
 N_BINS = int(D("bins"))
 
 
@@ -232,6 +244,25 @@ def sweep(name, w, d, r, profile, closed=False):
     return ob
 
 
+def yz_prism(name, pts, x0, x1):
+    """Prism along x of a simple polygon given in the (y, z) plane."""
+    n = len(pts)
+    verts = [(x0, y, z) for y, z in pts] + [(x1, y, z) for y, z in pts]
+    faces = [tuple(range(n))[::-1], tuple(range(n, 2 * n))]
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append((i, j, n + j, n + i))
+    ob = mesh_obj(name, verts, faces)
+    clean(ob)
+    if volume(ob) < 0:
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        bm.to_mesh(ob.data)
+        bm.free()
+    return ob
+
+
 def groove_profile(f):
     """Profile of the underside groove (open at z = 0), outward from the floor to the outer skirt."""
     gw = lip_t + 2 * f
@@ -265,14 +296,52 @@ def build_bin():
 
 
 def build_hood():
-    """Three walls + the bottom groove ring, open at the front above the ring, inner ledge for the tray."""
-    prof = [(sc, 0), (0, sc), (0, hood_h - sc), (sc, hood_h), (wall, hood_h),
+    """Three walls + the bottom groove ring, open at the front above the ring, inner ledge for the
+    tray; side and back walls rise above the rim under the roof curve."""
+    h = hood_h + roof_back_h
+    prof = [(sc, 0), (0, sc), (0, h), (wall, h),
             (wall, ledge_z), (wall + ledge_w, ledge_z), (wall + ledge_w, ledge_z - ledge_h),
             (wall, ledge_z - ledge_h - ledge_w),                          # 45° under the ledge
             (wall, foot_h), (bottom_t, foot_h), (bottom_t, 0)] + groove_profile(fit)
     ob = sweep("hood", bin_w, bin_d, corner_r, prof, closed=True)
-    difference(ob, [box(-1, -1, foot_h, bin_w + 2, bin_d - cover_depth + 1, hood_h + 2)])  # open front
+    above = [(-10, hood_h), (roof_y0, hood_h)] + [(y, z + hood_h) for y, z in roof_curve()] + \
+        [(bin_d + 10, hood_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]
+    difference(ob, [box(-1, -1, foot_h, bin_w + 2, bin_d - cover_depth + 1, h + 2)])   # open front
     clean(ob)
+    difference(ob, [yz_prism("above_roof", above, -1, bin_w + 1)])                     # walls stop at the roof curve
+    clean(ob)
+    # rebate for the roof: inside the outer lip (offset >= roof_lip) the wall top is roof_t lower
+    y0 = roof_y0 - roof_fit
+    rebate = [(y0, hood_h + roof_front_h - roof_t)] + [(y, z + hood_h) for y, z in roof_curve(-roof_t)] + \
+        [(bin_d + 10, hood_h + roof_back_h - roof_t), (bin_d + 10, 400), (y0, 400)]
+    cutter = yz_prism("rebate", rebate, -1, bin_w + 1)
+    inside = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, hood_h), (roof_lip, hood_h), (roof_lip, 500), (hole_off, 500)])
+    intersection(cutter, inside)
+    difference(ob, [cutter])
+    clean(ob)
+    assert len(ob.data.vertices) > 0, "hood boolean produced an empty mesh"
+    return ob
+
+
+def build_roof(in_use=False):
+    """Curved roof plate that drops into the rebate along the hood's side and back walls.  Modelled
+    in use orientation (z relative to the hood rim); exported lying on its side for printing."""
+    outer = roof_curve()
+    inner = roof_curve(-roof_t)
+    x0 = roof_lip + roof_fit
+    ob = yz_prism("roof", outer + inner[::-1], x0, bin_w - x0)
+    clean(ob)
+    if not in_use:  # rotate onto its side: x -> z, keep everything at >= 0
+        transform_verts(ob, lambda v: (v.z, v.y, v.x))  # a mirror: re-orient the faces
+        clean(ob)
+        if volume(ob) < 0:
+            bm = bmesh.new()
+            bm.from_mesh(ob.data)
+            bmesh.ops.reverse_faces(bm, faces=bm.faces)
+            bm.to_mesh(ob.data)
+            bm.free()
+        lo, _ = bbox(ob)
+        transform_verts(ob, lambda v: (v.x - lo[0], v.y - lo[1], v.z - lo[2]))
     return ob
 
 
@@ -479,6 +548,7 @@ def place_stack(parts, gap=0.0, ghost=True, alternate=False, top="hood"):
         objs.append(copy_obj(parts["hood"], "a_hood", 0, 0, z_lid, IVORY))
         objs.append(copy_obj(parts["tray"], "a_tray", wall + tray_fit, bin_d - cover_depth, z_lid + ledge_z + gap,
                              IVORY_B if alternate else IVORY))
+        objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, z_lid + hood_h + 2 * gap, IVORY_B if alternate else IVORY))
         return objs
     objs.append(copy_obj(parts["lid"], "a_lid", 0, 0, z_lid, IVORY, flip=True))
     if ghost:
@@ -499,14 +569,20 @@ def build_joint(gap):
 
 
 def build_section():
-    """Full stack (bins + lid) cut in half at x = bin_w / 2, back half kept."""
-    objs = [build_bin() for _ in range(N_BINS)]
-    for i, ob in enumerate(objs):
-        transform_verts(ob, lambda v, i=i: (v.x, v.y, v.z + i * bin_h))
-    lid = build_lid()
-    transform_verts(lid, lambda v: (v.x, bin_d - v.y, N_BINS * bin_h + lid_h - v.z))
-    ob = union(objs + [lid], "section")
-    intersection(ob, box(bin_w / 2, -1, -1, bin_w, bin_d + 2, N_BINS * bin_h + lid_h + 2))
+    """Top bin + hood + tray + roof cut in half at x = bin_w / 2, one half kept (side section)."""
+    z0 = (N_BINS - 1) * bin_h
+    top = build_bin()
+    transform_verts(top, lambda v: (v.x, v.y, v.z + z0))
+    hood = build_hood()
+    transform_verts(hood, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
+    tray = build_tray()
+    transform_verts(tray, lambda v: (v.x + wall + tray_fit, v.y + bin_d - cover_depth, v.z + N_BINS * bin_h + ledge_z))
+    roof = build_roof(in_use=True)
+    transform_verts(roof, lambda v: (v.x, v.y, v.z + N_BINS * bin_h + hood_h))
+    parts = [top, hood, tray, roof]
+    for ob in parts:
+        intersection(ob, box(bin_w / 2, -5, z0 - 1, bin_w, bin_d + 10, 400))
+    ob = join(parts, "section")
     clean(ob)
     return ob
 
@@ -530,7 +606,8 @@ def main():
     if bin_h + lip_h > 180:
         print("WARNING: bin taller than 180 mm")
 
-    parts = {"bin": build_bin(), "lid": build_lid(), "hood": build_hood(), "tray": build_tray(), "test": build_test()}
+    parts = {"bin": build_bin(), "lid": build_lid(), "hood": build_hood(), "tray": build_tray(), "roof": build_roof(),
+             "test": build_test()}
     for name, ob in parts.items():
         export_stl(ob, {"test": "test-coupon"}.get(name, name) + ".stl")
         lo, hi = bbox(ob)
@@ -541,6 +618,7 @@ def main():
         return
 
     setup_render()
+    parts["roof_use"] = build_roof(in_use=True)
     for ob in parts.values():
         ob.hide_render = True
 
@@ -568,7 +646,7 @@ def main():
     bpy.context.scene.render.resolution_y = 800
     x = 0
     objs = []
-    for name, col in (("bin", IVORY), ("lid", IVORY), ("hood", IVORY), ("tray", IVORY), ("test", ORANGE)):
+    for name, col in (("bin", IVORY), ("lid", IVORY), ("hood", IVORY), ("tray", IVORY), ("roof", IVORY), ("test", ORANGE)):
         ob = parts[name]
         lo, hi = bbox(ob)
         objs.append(copy_obj(ob, f"p_{name}", x - lo[0], -lo[1], -lo[2], col))
@@ -599,8 +677,8 @@ def main():
     render(os.path.join(IMG_DIR, "joint-section.png"))
     clear_render_objects()
 
-    bpy.context.scene.render.resolution_x = 1000
-    bpy.context.scene.render.resolution_y = 1400
+    bpy.context.scene.render.resolution_x = 1200
+    bpy.context.scene.render.resolution_y = 1200
     s = build_section()
     objs = [copy_obj(s, "s_section", 0, 0, 0, BLUE_B)]
     s.hide_render = True
