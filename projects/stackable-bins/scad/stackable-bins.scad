@@ -82,15 +82,18 @@ hood_h = 72;
 cover_depth = 115;
 // Total tray height (floor + rim); the space for pulling tissues under the tray is hood_h - tray_h (30)
 tray_h = 42;
-// Curved roof over the tray: height of its front edge and of its back end above the hood rim, how far
-// its front edge sits back from the hood's open front, plate thickness.  The roof drops into a rebate
-// along the side and back walls: the outer roof_lip of the wall stays at full height, the rest is roof_t lower.
-roof_front_h = 12;
-roof_back_h = 36;
+// One-piece cap over the tray: a curved shell, high at the front and descending to the back, plus a
+// full-width front plate.  roof_front_h / roof_back_h = height above the hood rim at the front edge / back;
+// roof_setback = how far the walls' step (shell front) sits back from the hood's open front; the shell
+// drops into a rebate along the side and back walls (outer roof_lip of the wall stays at full height, the
+// rest is roof_t lower); the front plate hangs in front of the step down to roof_gap above the tray rim.
+roof_front_h = 36;
+roof_back_h = 8;
 roof_setback = 22;
 roof_t = 3.0;
 roof_lip = 1.0;
 roof_fit = 0.3;
+roof_gap = 0.5;
 tray_wall = 1.6;
 tray_floor = 2.0;
 // Clearance between tray and hood, per side
@@ -131,10 +134,14 @@ tray_d = cover_depth - wall - tray_fit;     // front face of the tray is flush w
 tray_back_r = corner_r - wall - tray_fit;
 roof_y0 = bin_d - cover_depth + roof_setback;   // y of the roof's front edge
 roof_yc = bin_d - roof_lip - roof_fit;          // back end of the roof (inside the back wall's lip)
-roof_a = roof_yc - roof_y0;                     // ellipse semi-axes of the roof curve
-roof_b = roof_back_h - roof_front_h;
-// outer curve of the roof, front (vertical tangent) to back (horizontal tangent), relative to the hood rim
-function roof_curve(dz = 0) = [for (k = [0 : 30]) [roof_yc - roof_a * cos(k * 3), roof_front_h + dz + roof_b * sin(k * 3)]];
+roof_a = roof_yc - roof_y0;                     // ellipse semi-axes of the dome curve
+roof_b = roof_front_h - roof_back_h;
+roof_step = roof_y0 - roof_t - roof_fit;        // the walls step up here: front plate + clearance sit between the lips
+// dome curve of the cap: quarter ellipse, horizontal tangent at the front top, vertical tangent at the back wall;
+// off > 0 moves it inward along the normal (true offset: inner face of the shell, rebate in the walls)
+function roof_curve(off = 0) = [for (k = [0 : 30])
+    let (t = k * 3, ny = -sin(t) / roof_a, nz = -cos(t) / roof_b, n = norm([ny, nz]))
+    [roof_y0 + roof_a * sin(t) + off * ny / n, roof_back_h + roof_b * cos(t) + off * nz / n]];
 tiny = 0.01;
 $fn = 64;
 
@@ -229,7 +236,7 @@ module lid() { lid_body(bin_w, bin_d, corner_r, fit); }
 module yz_prism(pts, x0, x1) { translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) polygon(pts); }
 module hood() {
     w = bin_w; d = bin_d; r = corner_r; sc = seam_chamfer;
-    h = hood_h + roof_back_h;
+    h = hood_h + max(roof_front_h, roof_back_h);
     difference() {
         union() {
             loft(w, d, r, sc, 0, 0, sc);
@@ -243,26 +250,33 @@ module hood() {
         groove(w, d, r);
         translate([-1, -1, foot_h]) cube([w + 2, d - cover_depth + 1, h + 2]);      // open front (the bottom ring stays)
         // everything above the roof curve; in front of the roof the walls stop at the rim (hood_h)
-        yz_prism(concat([[-10, hood_h], [roof_y0, hood_h]],
+        yz_prism(concat([[-10, hood_h], [roof_step, hood_h], [roof_step, hood_h + roof_front_h]],
                         [for (p = roof_curve()) [p[0], p[1] + hood_h]],
                         [[d + 10, hood_h + roof_back_h], [d + 10, 400], [-10, 400]]), -1, w + 1);
         // rebate for the roof: inside the outer lip the wall top is roof_t lower
         intersection() {
-            yz_prism(concat([[roof_y0 - roof_fit, hood_h + roof_front_h - roof_t]],
-                            [for (p = roof_curve(-roof_t)) [p[0], p[1] + hood_h]],
-                            [[d + 10, hood_h + roof_back_h - roof_t], [d + 10, 400], [roof_y0 - roof_fit, 400]]), -1, w + 1);
+            let (inner = roof_curve(roof_t), yb = roof_y0 + roof_fit)
+            yz_prism(concat([[roof_step - 0.01, hood_h], [yb, hood_h], [yb, hood_h + inner[0][1]]],
+                            [for (p = inner) if (p[0] >= yb) [p[0], p[1] + hood_h]],
+                            [[inner[30][0], hood_h + roof_back_h - roof_t], [d + 10, hood_h + roof_back_h - roof_t],
+                             [d + 10, 400], [roof_step - 0.01, 400]]), -1, w + 1);
             prism(w, d, r, roof_lip, hood_h, 500);
         }
     }
 }
-// ---- Roof: curved plate that drops into the rebate along the hood's side and back walls.
-//      Modelled in use orientation; roof() rotates it onto its side for printing (use a brim).
+// ---- Roof: one-piece cap = dome shell + vertical front plate (one C-shaped profile swept between the lips).
+//      Drops into the rebate along the side and back walls.  Modelled in use orientation; roof() rotates it
+//      onto its side for printing (zero overhangs, use a brim).
 module roof_in_use() {
     outer = roof_curve();
-    inner = roof_curve(-roof_t);
-    yz_prism(concat(outer, [for (i = [len(inner) - 1 : -1 : 0]) inner[i]]), roof_lip + roof_fit, bin_w - roof_lip - roof_fit);
+    inner = roof_curve(roof_t);
+    ys = roof_y0 - roof_t;
+    zb = roof_back_h - roof_t;
+    yz_prism(concat([[ys, roof_front_h]], outer, [[roof_yc, zb], [inner[30][0], zb]],
+                    [for (i = [len(inner) - 1 : -1 : 0]) inner[i]], [[roof_y0, roof_gap], [ys, roof_gap]]),
+             roof_lip + roof_fit, bin_w - roof_lip - roof_fit);
 }
-module roof() { translate([0, 0, bin_w - roof_lip - roof_fit]) rotate([0, 90, 0]) translate([0, -roof_y0, -(roof_front_h - roof_t)]) roof_in_use(); }
+module roof() { translate([0, 0, bin_w - roof_lip - roof_fit]) rotate([0, 90, 0]) translate([0, -(roof_y0 - roof_t), -roof_gap]) roof_in_use(); }
 // ---- Tray: drops into the hood from above and rests on the ledge
 module tray() {
     module rr2(off) {  // rounded rect with different back / front corner radii

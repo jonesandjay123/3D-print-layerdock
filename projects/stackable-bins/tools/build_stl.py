@@ -83,17 +83,26 @@ tray_w = bin_w - 2 * wall - 2 * tray_fit
 tray_d = cover_depth - wall - tray_fit
 tray_back_r = corner_r - wall - tray_fit
 roof_front_h, roof_back_h, roof_setback = D("roof_front_h"), D("roof_back_h"), D("roof_setback")
-roof_t, roof_lip, roof_fit = D("roof_t"), D("roof_lip"), D("roof_fit")
-roof_y0 = bin_d - cover_depth + roof_setback
+roof_t, roof_lip, roof_fit, roof_gap = D("roof_t"), D("roof_lip"), D("roof_fit"), D("roof_gap")
+roof_y0 = bin_d - cover_depth + roof_setback   # y of the shell's front end (the walls' step); the front plate hangs just in front
 roof_yc = bin_d - roof_lip - roof_fit          # back end of the roof (inside the back wall's lip)
 roof_a = roof_yc - roof_y0
-roof_b = roof_back_h - roof_front_h
+roof_b = roof_front_h - roof_back_h
+roof_step = roof_y0 - roof_t - roof_fit         # the walls step up here: front plate (roof_t) + clearance sit between the lips
 
 
-def roof_curve(dz=0.0):
-    """Outer curve of the roof, front (vertical tangent) to back (horizontal tangent), z relative to the hood rim."""
-    return [(roof_yc - roof_a * math.cos(math.radians(k * 3)), roof_front_h + dz + roof_b * math.sin(math.radians(k * 3)))
-            for k in range(31)]
+def roof_curve(off=0.0):
+    """Dome curve of the cap: quarter ellipse, horizontal tangent at the front top (roof_y0, roof_front_h),
+    vertical tangent at the back (roof_yc, roof_back_h); bulges up and back.  `off` > 0 moves the curve
+    inward along the normal (a true offset, used for the inner face and the rebate).  z relative to the hood rim."""
+    pts = []
+    for k in range(31):
+        t = math.radians(k * 3)
+        y, z = roof_y0 + roof_a * math.sin(t), roof_back_h + roof_b * math.cos(t)
+        ny, nz = -math.sin(t) / roof_a, -math.cos(t) / roof_b   # toward the ellipse centre
+        n = math.hypot(ny, nz)
+        pts.append((y + off * ny / n, z + off * nz / n))
+    return pts
 N_BINS = int(D("bins"))
 
 
@@ -298,22 +307,26 @@ def build_bin():
 def build_hood():
     """Three walls + the bottom groove ring, open at the front above the ring, inner ledge for the
     tray; side and back walls rise above the rim under the roof curve."""
-    h = hood_h + roof_back_h
+    h = hood_h + max(roof_front_h, roof_back_h)
     prof = [(sc, 0), (0, sc), (0, h), (wall, h),
             (wall, ledge_z), (wall + ledge_w, ledge_z), (wall + ledge_w, ledge_z - ledge_h),
             (wall, ledge_z - ledge_h - ledge_w),                          # 45° under the ledge
             (wall, foot_h), (bottom_t, foot_h), (bottom_t, 0)] + groove_profile(fit)
     ob = sweep("hood", bin_w, bin_d, corner_r, prof, closed=True)
-    above = [(-10, hood_h), (roof_y0, hood_h)] + [(y, z + hood_h) for y, z in roof_curve()] + \
-        [(bin_d + 10, hood_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]
+    above = [(-10, hood_h), (roof_step, hood_h), (roof_step, hood_h + roof_front_h)] + \
+        [(y, z + hood_h) for y, z in roof_curve()] + \
+        [(bin_d + 10, hood_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]   # the curve is vertical at its back end
     difference(ob, [box(-1, -1, foot_h, bin_w + 2, bin_d - cover_depth + 1, h + 2)])   # open front
     clean(ob)
     difference(ob, [yz_prism("above_roof", above, -1, bin_w + 1)])                     # walls stop at the roof curve
     clean(ob)
     # rebate for the roof: inside the outer lip (offset >= roof_lip) the wall top is roof_t lower
-    y0 = roof_y0 - roof_fit
-    rebate = [(y0, hood_h + roof_front_h - roof_t)] + [(y, z + hood_h) for y, z in roof_curve(-roof_t)] + \
-        [(bin_d + 10, hood_h + roof_back_h - roof_t), (bin_d + 10, 400), (y0, 400)]
+    inner = roof_curve(roof_t)
+    yb = roof_y0 + roof_fit                                      # clearance behind the front plate
+    rebate = [(roof_step - 0.01, hood_h), (yb, hood_h), (yb, hood_h + inner[0][1])] + \
+        [(y, z + hood_h) for y, z in inner if y >= yb] + \
+        [(inner[-1][0], hood_h + roof_back_h - roof_t), (bin_d + 10, hood_h + roof_back_h - roof_t),
+         (bin_d + 10, 400), (roof_step - 0.01, 400)]
     cutter = yz_prism("rebate", rebate, -1, bin_w + 1)
     inside = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, hood_h), (roof_lip, hood_h), (roof_lip, 500), (hole_off, 500)])
     intersection(cutter, inside)
@@ -324,12 +337,17 @@ def build_hood():
 
 
 def build_roof(in_use=False):
-    """Curved roof plate that drops into the rebate along the hood's side and back walls.  Modelled
-    in use orientation (z relative to the hood rim); exported lying on its side for printing."""
+    """One-piece cap: dome shell + vertical front plate, one C-shaped profile swept across the width
+    between the hood's lips.  It drops into the rebate along the side and back walls; the front plate
+    hangs down to roof_gap above the tray rim.  Modelled in use orientation (z relative to the hood
+    rim); exported lying on its side (zero overhangs, needs a brim)."""
     outer = roof_curve()
-    inner = roof_curve(-roof_t)
+    inner = roof_curve(roof_t)
     x0 = roof_lip + roof_fit
-    ob = yz_prism("roof", outer + inner[::-1], x0, bin_w - x0)
+    ys = roof_y0 - roof_t                                        # outer face of the front plate
+    zb = roof_back_h - roof_t                                    # back end face sits on the back wall's rebate
+    ob = yz_prism("roof", [(ys, roof_front_h)] + outer + [(roof_yc, zb), (inner[-1][0], zb)] + inner[::-1] +
+                  [(roof_y0, roof_gap), (ys, roof_gap)], x0, bin_w - x0)
     clean(ob)
     if not in_use:  # rotate onto its side: x -> z, keep everything at >= 0
         transform_verts(ob, lambda v: (v.z, v.y, v.x))  # a mirror: re-orient the faces
