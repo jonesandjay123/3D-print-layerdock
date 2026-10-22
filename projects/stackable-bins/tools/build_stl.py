@@ -369,6 +369,37 @@ def build_roof(in_use=False):
     return ob
 
 
+def build_lid():
+    return lid_body(bin_w, bin_d, corner_r, fit)
+
+
+def text_cutter(text, cx, cy, z_top, size, depth):
+    """Extruded text (readable from +z) whose top is at z_top, going `depth` down: subtract it to engrave."""
+    cu = bpy.data.curves.new("txt", type="FONT")
+    cu.body = text
+    cu.size = size
+    cu.align_x = "CENTER"
+    cu.align_y = "CENTER"
+    cu.extrude = depth / 2 + 0.5
+    ob = bpy.data.objects.new("txt", cu)
+    bpy.context.scene.collection.objects.link(ob)
+    bpy.ops.object.select_all(action="DESELECT")
+    ob.select_set(True)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.convert(target="MESH")
+    ob = bpy.context.view_layer.objects.active
+    e = depth / 2 + 0.5                     # converted mesh spans z in [-e, e]
+    transform_verts(ob, lambda v: (v.x + cx, v.y + cy, v.z + z_top - depth + e))  # -> [z_top - depth, z_top + 1]
+    clean(ob)
+    if volume(ob) < 0:
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        bm.to_mesh(ob.data)
+        bm.free()
+    return ob
+
+
 def build_test():
     tw, td, tr, th = D("test_w"), D("test_d"), D("test_r"), D("test_h")
     ts, tdp = D("test_text_size"), D("test_text_depth")
