@@ -75,30 +75,42 @@ foot_h = groove_depth + D("foot_extra")
 lid_h = groove_depth + D("lid_t")
 hole_off = 6.0
 rim_zone = D("rim_zone")
-top_h, cover_depth = D("top_h"), D("cover_depth")
-hood_h = top_h  # rim height of the top container above the bin rim (the cap's curve is measured from here)
-roof_front_h, roof_back_h, roof_setback = D("roof_front_h"), D("roof_back_h"), D("roof_setback")
-roof_t, roof_lip, roof_fit, roof_gap = D("roof_t"), D("roof_lip"), D("roof_fit"), D("roof_gap")
-roof_y0 = bin_d - cover_depth + roof_setback   # y of the shell's front end (the walls' step); the front plate hangs just in front
-roof_yc = bin_d - roof_lip - roof_fit          # back end of the roof (inside the back wall's lip)
-roof_a = roof_yc - roof_y0
-roof_b = roof_front_h - roof_back_h
-roof_step = roof_y0 - roof_t - roof_fit         # the walls step up here: front plate (roof_t) + clearance sit between the lips
-
-
-def roof_curve(off=0.0):
-    """Dome curve of the cap: quarter ellipse, horizontal tangent at the front top (roof_y0, roof_front_h),
-    vertical tangent at the back (roof_yc, roof_back_h); bulges up and back.  `off` > 0 moves the curve
-    inward along the normal (a true offset, used for the inner face and the rebate).  z relative to the hood rim."""
-    pts = []
-    for k in range(31):
-        t = math.radians(k * 3)
-        y, z = roof_y0 + roof_a * math.sin(t), roof_back_h + roof_b * math.cos(t)
-        ny, nz = -math.sin(t) / roof_a, -math.cos(t) / roof_b   # toward the ellipse centre
-        n = math.hypot(ny, nz)
-        pts.append((y + off * ny / n, z + off * nz / n))
-    return pts
 N_BINS = int(D("bins"))
+top_lip_h, cover_depth = D("top_lip_h"), D("cover_depth")
+roll_r1, roll_r2, rail_t = D("roll_r1"), D("roll_r2"), D("rail_t")
+track_w, track_depth, track_offset = D("track_w"), D("track_depth"), D("track_offset")
+slat_w, slat_gap, slat_t, slat_chamfer, hinge_t, slat_fit = D("slat_w"), D("slat_gap"), D("slat_t"), D("slat_chamfer"), D("hinge_t"), D("slat_fit")
+N_SLATS, handle_h, handle_w = int(D("slats")), D("handle_h"), D("handle_w")
+roof_t, roof_lip, roof_fit = D("roof_t"), D("roof_lip"), D("roof_fit")
+roll_top_h = top_lip_h + roll_r1            # height of the flat top above the bin rim
+back_wall_h = roll_top_h - roll_r2          # where the back corner meets the back wall
+y_front = bin_d - cover_depth               # front face of the container (the open third is in front of it)
+y_cap = y_front + roll_r1                   # end of the door's arc = front edge of the fixed roof
+door_w = bin_w - 2 * (wall + rail_t) + 2 * (track_depth - slat_fit)
+door_len = N_SLATS * slat_w + (N_SLATS - 1) * slat_gap
+
+
+def roll_profile(off=0.0):
+    """Side-wall outline of the roll-top region (y, z above the bin rim), offset inward by `off`:
+    front arc (vertical at the lip, horizontal at the top), flat top, back corner (ends vertical at
+    the back wall).  The back wall itself is not included."""
+    pts = []
+    cy, cz = y_front + roll_r1, top_lip_h
+    for k in range(31):
+        a = math.radians(180 - 90 * k / 30)
+        pts.append((cy + (roll_r1 - off) * math.cos(a), cz + (roll_r1 - off) * math.sin(a)))
+    cy, cz = bin_d - roll_r2, roll_top_h - roll_r2
+    for k in range(1, 31):
+        a = math.radians(90 - 90 * k / 30)
+        pts.append((cy + (roll_r2 - off) * math.cos(a), cz + (roll_r2 - off) * math.sin(a)))
+    return pts
+
+
+def track_path():
+    """Centre line of the door track (y, z above the bin rim), lip -> arc -> top -> corner -> down the back wall."""
+    pts = roll_profile(track_offset)
+    pts.append((bin_d - track_offset, floor_t))
+    return pts
 
 
 # --------------------------------------------------------------------- mesh helpers
@@ -300,63 +312,72 @@ def build_bin():
 
 
 def build_top():
-    """One-piece top container: same floor and groove ring as a bin, but the front (bin_d - cover_depth)
-    is open right through (only the 6 mm groove ring stays) so a hand reaches the tissues in the bin
-    below; the back cover_depth is a closed box.  Side and back walls rise above the rim under the cap's
-    dome curve, with the rebate for the cap."""
-    h = top_h + max(roof_front_h, roof_back_h)
+    """One-piece roll-top container: same floor and groove ring as a bin; the front (bin_d - cover_depth)
+    is open right through (only the ring stays) so a hand reaches the tissues in the bin below; the
+    back cover_depth is a box with a low front lip, side walls that follow the roll-top outline and
+    carry the door track (a channel in an inner rail), and a rebate for the fixed rear roof."""
+    h = roll_top_h
     prof = [(hole_off, 0)] + groove_profile(fit) + [
         (sc, 0), (0, sc), (0, h), (wall, h),
         (wall, foot_h), (bottom_t, foot_h), (bottom_t, floor_t), (hole_off, floor_t)]
     ob = sweep("top", bin_w, bin_d, corner_r, prof)
-    yf = bin_d - cover_depth
-    # open front: everything inside the ring, and everything above the ring, for y < yf
+    yf = y_front
     inside = sweep("inside_ring", bin_w, bin_d, corner_r, [(hole_off, -1), (bottom_t, -1), (bottom_t, 400), (hole_off, 400)])
     intersection(inside, box(-1, -1, -2, bin_w + 2, yf + 1, 500))
     difference(ob, [inside])
     clean(ob)
     difference(ob, [box(-1, -1, foot_h, bin_w + 2, yf + 1, h + 2)])
     clean(ob)
-    # front wall of the container
-    union([ob, box(wall - 0.01, yf, 0, bin_w - 2 * wall + 0.02, wall, top_h, "front_wall")], "top")
+    # front lip and the two inner rails that carry the door track
+    outline = roll_profile(0.0)
+    rail_poly = [(yf - 0.01, floor_t - 0.01), (yf - 0.01, top_lip_h)] + outline + [(bin_d - wall + 0.01, back_wall_h), (bin_d - wall + 0.01, floor_t - 0.01)]
+    adds = [box(wall - 0.01, yf, 0, bin_w - 2 * wall + 0.02, wall, top_lip_h, "lip"),
+            yz_prism("rail_l", rail_poly, wall - 0.01, wall + rail_t),
+            yz_prism("rail_r", rail_poly, bin_w - wall - rail_t, bin_w - wall + 0.01)]
+    union([ob] + adds, "top")
     clean(ob)
-    # walls stop at the cap's dome curve (vertical step up at roof_step, curve vertical at its back end)
-    above = [(-10, top_h), (roof_step, top_h), (roof_step, top_h + roof_front_h)] + \
-        [(y, z + top_h) for y, z in roof_curve()] + \
-        [(bin_d + 10, top_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]
-    difference(ob, [yz_prism("above_roof", above, -1, bin_w + 1)])
+    # wall tops: along the arc the walls stop roof_t below the outline (the door runs there); from the
+    # arc's end the walls follow the outline and carry the roof in a rebate
+    arc_low = [(y, z) for y, z in roll_profile(roof_t) if y <= y_cap + 1e-6]
+    rest = [(y, z) for y, z in outline if y >= y_cap - 1e-6]
+    above = [(-10, top_lip_h), (yf + roof_t, top_lip_h)] + arc_low + [(y_cap, roll_top_h)] + rest + \
+        [(bin_d + 10, back_wall_h), (bin_d + 10, 400), (-10, 400)]
+    difference(ob, [yz_prism("above", above, -1, bin_w + 1)])
     clean(ob)
-    # rebate for the cap: inside the outer lip (offset >= roof_lip) the wall top is roof_t lower
-    inner = roof_curve(roof_t)
-    yb = roof_y0 + roof_fit
-    rebate = [(roof_step - 0.01, top_h), (yb, top_h), (yb, top_h + inner[0][1])] + \
-        [(y, z + top_h) for y, z in inner if y >= yb] + \
-        [(inner[-1][0], top_h + roof_back_h - roof_t), (bin_d + 10, top_h + roof_back_h - roof_t),
-         (bin_d + 10, 400), (roof_step - 0.01, 400)]
+    inner = [(y, z) for y, z in roll_profile(roof_t) if y >= y_cap - 1e-6]
+    rebate = [(y_cap - 0.01, roll_top_h - roof_t)] + inner + \
+        [(inner[-1][0], back_wall_h - roof_t), (bin_d + 10, back_wall_h - roof_t), (bin_d + 10, 400), (y_cap - 0.01, 400)]
     cutter = yz_prism("rebate", rebate, -1, bin_w + 1)
-    inside2 = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, top_h), (roof_lip, top_h), (roof_lip, 500), (hole_off, 500)])
+    inside2 = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, top_lip_h), (roof_lip, top_lip_h), (roof_lip, 500), (hole_off, 500)])
     intersection(cutter, inside2)
     difference(ob, [cutter])
+    clean(ob)
+    # door track: a channel cut into the inner face of each rail, open at the floor so the door can be fed in
+    o1, o2 = track_offset - track_w / 2, track_offset + track_w / 2
+    outer_c = roll_profile(o1) + [(bin_d - o1, floor_t - 1)]
+    inner_c = roll_profile(o2) + [(bin_d - o2, floor_t - 1)]
+    channel = outer_c + inner_c[::-1]
+    x_in = wall + rail_t
+    cut = [yz_prism("track_l", channel, x_in - track_depth, x_in + 0.5),
+           yz_prism("track_r", channel, bin_w - x_in - 0.5, bin_w - x_in + track_depth)]
+    difference(ob, cut)
     clean(ob)
     assert len(ob.data.vertices) > 0, "top boolean produced an empty mesh"
     return ob
 
 
 def build_roof(in_use=False):
-    """One-piece cap: dome shell + vertical front plate, one C-shaped profile swept across the width
-    between the top container's lips.  It drops into the rebate along the side and back walls; the front
-    plate hangs down to roof_gap above the container's front wall.  Modelled in use orientation (z relative to the hood
-    rim); exported lying on its side (zero overhangs, needs a brim)."""
-    outer = roof_curve()
-    inner = roof_curve(roof_t)
+    """Fixed rear roof: flat top + back corner, 3 mm thick, dropping into the rebate of the side and back
+    walls; the door slides underneath it.  Modelled in use orientation (z above the bin rim); exported
+    lying on its side (zero overhangs, needs a brim)."""
+    outer = [(y_cap + roof_fit, roll_top_h)] + [(y, z) for y, z in roll_profile(0.0) if y > y_cap + roof_fit]
+    inner = [(y_cap + roof_fit, roll_top_h - roof_t)] + [(y, z) for y, z in roll_profile(roof_t) if y > y_cap + roof_fit]
+    zb = back_wall_h - roof_t
     x0 = roof_lip + roof_fit
-    ys = roof_y0 - roof_t                                        # outer face of the front plate
-    zb = roof_back_h - roof_t                                    # back end face sits on the back wall's rebate
-    ob = yz_prism("roof", [(ys, roof_front_h)] + outer + [(roof_yc, zb), (inner[-1][0], zb)] + inner[::-1] +
-                  [(roof_y0, roof_gap), (ys, roof_gap)], x0, bin_w - x0)
+    ob = yz_prism("roof", outer + [(outer[-1][0], zb), (inner[-1][0], zb)] + inner[::-1], x0, bin_w - x0)
     clean(ob)
-    if not in_use:  # rotate onto its side: x -> z, keep everything at >= 0
-        transform_verts(ob, lambda v: (v.z, v.y, v.x))  # a mirror: re-orient the faces
+    if not in_use:
+        transform_verts(ob, lambda v: (v.z, v.y, v.x))
         clean(ob)
         if volume(ob) < 0:
             bm = bmesh.new()
@@ -367,6 +388,72 @@ def build_roof(in_use=False):
         lo, _ = bbox(ob)
         transform_verts(ob, lambda v: (v.x - lo[0], v.y - lo[1], v.z - lo[2]))
     return ob
+
+
+def build_door():
+    """Tambour door printed flat, inner face on the bed: N slats (chamfered on the outer face so the gaps
+    open into a V when the door bends) joined by thin living hinges; a handle ridge on the first slat.
+    x = width (runs in the tracks), y = along the door, z = thickness."""
+    parts = []
+    x_h0, x_h1 = track_depth - slat_fit + 0.5, door_w - (track_depth - slat_fit) - 0.5   # hinge stays out of the tracks
+    for i in range(N_SLATS):
+        y0 = i * (slat_w + slat_gap)
+        poly = [(y0, 0), (y0 + slat_w, 0), (y0 + slat_w - slat_chamfer, slat_t), (y0 + slat_chamfer, slat_t)]
+        parts.append(yz_prism(f"slat{i}", poly, 0, door_w))
+        if i < N_SLATS - 1:
+            parts.append(box(x_h0, y0 + slat_w - 0.3, 0, x_h1 - x_h0, slat_gap + 0.6, hinge_t, f"hinge{i}"))
+    # handle ridge on the first slat (outer face), rounded with a hull of two boxes
+    hw = handle_w
+    parts.append(hull_obj("handle", box_pts(x_h0 + 10, slat_chamfer, slat_t - 0.5, x_h1 - x_h0 - 20, slat_w - 2 * slat_chamfer, 0.5) +
+                          box_pts(x_h0 + 10, slat_w / 2 - hw / 2, slat_t - 0.5, x_h1 - x_h0 - 20, hw, handle_h + 0.5)))
+    ob = union(parts, "door")
+    clean(ob)
+    return ob
+
+
+def hull_obj(name, points):
+    bm = bmesh.new()
+    for p in points:
+        bm.verts.new(p)
+    bm.verts.ensure_lookup_table()
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(ob)
+    return ob
+
+
+def door_in_place(s0, name):
+    """Render helper: the door's slats laid along the track, starting s0 mm from the lip (0 = closed)."""
+    pts = track_path()
+    L = [0.0]
+    for (y0, z0), (y1, z1) in zip(pts, pts[1:]):
+        L.append(L[-1] + math.hypot(y1 - y0, z1 - z0))
+
+    def at(sv):
+        for i in range(len(L) - 1):
+            if L[i] <= sv <= L[i + 1]:
+                t = (sv - L[i]) / (L[i + 1] - L[i] + 1e-9)
+                return (pts[i][0] + t * (pts[i + 1][0] - pts[i][0]), pts[i][1] + t * (pts[i + 1][1] - pts[i][1]),
+                        math.atan2(pts[i + 1][1] - pts[i][1], pts[i + 1][0] - pts[i][0]))
+        return pts[-1][0], pts[-1][1], -math.pi / 2
+    slats = []
+    for i in range(N_SLATS):
+        sv = s0 + i * (slat_w + slat_gap) + slat_w / 2
+        if sv + slat_w / 2 > L[-1]:
+            break
+        y, z, ang = at(sv)
+        c, sn = math.cos(ang), math.sin(ang)
+        ny, nz = -sn, c
+        corners = []
+        for dy, dz in ((-slat_w / 2, -slat_t / 2), (slat_w / 2, -slat_t / 2), (slat_w / 2, slat_t / 2), (-slat_w / 2, slat_t / 2)):
+            corners.append((y + dy * c + dz * ny, z + dy * sn + dz * nz))
+        x0 = (bin_w - door_w) / 2
+        slats.append(yz_prism(f"ds{i}", corners, x0, x0 + door_w))
+    return join(slats, name)
 
 
 def build_lid():
@@ -553,6 +640,7 @@ IVORY_B = (0.74, 0.72, 0.68, 1)
 BLUE_B = (0.27, 0.51, 0.71, 1)
 ORANGE = (0.95, 0.60, 0.20, 1)
 GHOST = (0.25, 0.55, 0.30, 1)
+DOOR = (0.72, 0.66, 0.70, 1)
 
 
 def place_stack(parts, gap=0.0, ghost=True, alternate=False, top="hood"):
@@ -563,7 +651,10 @@ def place_stack(parts, gap=0.0, ghost=True, alternate=False, top="hood"):
     z_lid = N_BINS * bin_h + N_BINS * gap
     if top == "hood":
         objs.append(copy_obj(parts["top"], "a_top", 0, 0, z_lid, IVORY))
-        objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, z_lid + top_h + gap, IVORY_B if alternate else IVORY))
+        objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, z_lid + 2 * gap, IVORY_B if alternate else IVORY))
+        objs.append(copy_obj(parts["door_closed" if gap == 0 else "door_flat"], "a_door", 0, 0, z_lid + (gap if gap else 0), DOOR))
+        if gap:
+            objs[-1].location = ((bin_w - door_w) / 2, y_front + 10, z_lid + roll_top_h + 3 * gap)
         return objs
     objs.append(copy_obj(parts["lid"], "a_lid", 0, 0, z_lid, IVORY, flip=True))
     if ghost:
@@ -591,8 +682,10 @@ def build_section():
     cont = build_top()
     transform_verts(cont, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
     roof = build_roof(in_use=True)
-    transform_verts(roof, lambda v: (v.x, v.y, v.z + N_BINS * bin_h + top_h))
-    parts = [top, cont, roof]
+    transform_verts(roof, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
+    door = door_in_place(door_len * 0.6, "door_half")
+    transform_verts(door, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
+    parts = [top, cont, roof, door]
     for ob in parts:
         intersection(ob, box(bin_w / 2, -5, z0 - 1, bin_w, bin_d + 10, 400))
     ob = join(parts, "section")
@@ -610,8 +703,10 @@ def main():
     iw, idp, ih = bin_w - 2 * wall, bin_d - 2 * wall, bin_h - floor_t
     ir = corner_r - wall
     cavity_l = (iw * idp - (4 - math.pi) * ir * ir) * ih / 1e6
-    print(f"stackable-bins: top container {bin_w - 2 * wall:.0f} x {cover_depth - 2 * wall:.0f} x {top_h - floor_t:.0f} mm inside, "
-          f"hand opening {bin_w - 2 * bottom_t:.0f} x {bin_d - cover_depth - bottom_t:.0f} mm")
+    print(f"stackable-bins: roll-top container {bin_w - 2 * (wall + rail_t):.0f} x {cover_depth - 2 * wall:.0f} mm inside, "
+          f"{top_lip_h - floor_t:.0f} mm at the lip / {back_wall_h - floor_t:.0f} mm at the back; hand opening "
+          f"{bin_w - 2 * bottom_t:.0f} x {bin_d - cover_depth - bottom_t:.0f} mm; door {door_w:.1f} x {door_len:.0f} mm, "
+          f"{N_SLATS} slats; track length {sum(math.hypot(b[0]-a[0], b[1]-a[1]) for a, b in zip(track_path(), track_path()[1:])):.0f} mm")
     print(f"stackable-bins v0.1: solver {SOLVER}; inner cavity {iw:.1f} x {idp:.1f} x {ih:.1f} mm "
           f"(~{cavity_l:.2f} L); printed bin height {bin_h + lip_h:.2f} mm; lid {lid_h:.2f} mm; "
           f"stack of {N_BINS} = {N_BINS * bin_h + lid_h:.1f} mm; rim_t {rim_t:.2f}; bottom_t {bottom_t:.2f}; "
@@ -621,7 +716,8 @@ def main():
     if bin_h + lip_h > 180:
         print("WARNING: bin taller than 180 mm")
 
-    parts = {"bin": build_bin(), "lid": build_lid(), "top": build_top(), "roof": build_roof(), "test": build_test()}
+    parts = {"bin": build_bin(), "lid": build_lid(), "top": build_top(), "roof": build_roof(), "door": build_door(),
+             "test": build_test()}
     for name, ob in parts.items():
         export_stl(ob, {"test": "test-coupon"}.get(name, name) + ".stl")
         lo, hi = bbox(ob)
@@ -633,6 +729,9 @@ def main():
 
     setup_render()
     parts["roof_use"] = build_roof(in_use=True)
+    parts["door_closed"] = door_in_place(0.0, "door_closed")
+    parts["door_open"] = door_in_place(door_len * 0.9, "door_open")
+    parts["door_flat"] = parts["door"]
     for ob in parts.values():
         ob.hide_render = True
 
@@ -644,6 +743,15 @@ def main():
     objs = place_stack(parts, gap=0, top="hood")
     camera_look(objs, (0.9, -1.3, 0.9))
     render(os.path.join(IMG_DIR, "assembly-top.png"))
+    clear_render_objects()
+
+    # door rolled back (open)
+    objs = [copy_obj(parts["bin"], f"a_bin{i}", 0, 0, i * bin_h, IVORY) for i in range(N_BINS)]
+    objs.append(copy_obj(parts["top"], "a_top", 0, 0, N_BINS * bin_h, IVORY))
+    objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, N_BINS * bin_h, IVORY))
+    objs.append(copy_obj(parts["door_open"], "a_door", 0, 0, N_BINS * bin_h, DOOR))
+    camera_look(objs, (0.9, -1.3, 0.9))
+    render(os.path.join(IMG_DIR, "assembly-open.png"))
     clear_render_objects()
 
     objs = place_stack(parts, gap=0, ghost=True, top="lid")
@@ -660,7 +768,7 @@ def main():
     bpy.context.scene.render.resolution_y = 800
     x = 0
     objs = []
-    for name, col in (("bin", IVORY), ("lid", IVORY), ("top", IVORY), ("roof", IVORY), ("test", ORANGE)):
+    for name, col in (("bin", IVORY), ("lid", IVORY), ("top", IVORY), ("roof", IVORY), ("door", DOOR), ("test", ORANGE)):
         ob = parts[name]
         lo, hi = bbox(ob)
         objs.append(copy_obj(ob, f"p_{name}", x - lo[0], -lo[1], -lo[2], col))

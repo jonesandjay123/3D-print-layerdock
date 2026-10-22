@@ -43,5 +43,5 @@ if [ "$SLICE" = 1 ]; then
   echo "== Bambu Studio slice dry run (3 walls, 0.15 mm elephant-foot compensation; everything else stock)"
   python3 "$REPO/tools/slice.py" --project . --set wall_loops=3 --set elefant_foot_compensation=0.15
   echo "== copying the sliced 3MF project files to print/"
-  for p in bin lid top roof test-coupon; do cp "build/slice/$p/$p.3mf" "print/$p.3mf"; done
+  for p in bin lid top roof door test-coupon; do cp "build/slice/$p/$p.3mf" "print/$p.3mf"; done
 fi

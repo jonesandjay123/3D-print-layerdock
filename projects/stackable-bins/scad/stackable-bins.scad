@@ -27,7 +27,7 @@
 
 /* [Output] */
 // Which part to render
-part = "assembly"; // [assembly, assembly_lid, bin, lid, top, roof, test, joint]
+part = "assembly"; // [assembly, assembly_lid, bin, lid, top, roof, door, test, joint]
 // Number of bins in the assembly preview
 bins = 3;
 
@@ -75,25 +75,35 @@ lid_t = 3.0;
 // Chamfer on the lid's top outer edge
 lid_edge_chamfer = 1.0;
 
-/* [Top container + cap: alternative to the flat lid, for the tissue use case] */
-// Height of the top container's rim above the bin rim (inside depth = top_h - floor_t)
-top_h = 60;
-// Depth (measured from the back) of the closed container; the front (bin_d - cover_depth) is open right
-// through so a hand reaches the tissues in the bin below
+/* [Roll-top top: container + tambour door + fixed rear roof] */
+// Height of the container's low front wall (lip) above the bin rim; the door's arc starts here
+top_lip_h = 30;
+// Depth (from the back) of the container; the front (bin_d - cover_depth) is open right through to the bin below
 cover_depth = 115;
-// One-piece cap over the container: a curved shell, high at the front and descending to the back, plus a
-// vertical front plate.  roof_front_h / roof_back_h = height above the rim at the front edge / back;
-// roof_setback = where the shell starts behind the container's front face (the front plate hangs just
-// in front of it, above the container's front wall); the shell drops into a rebate along the side and
-// back walls (outer roof_lip of the wall stays at full height, the rest is roof_t lower); roof_gap =
-// clearance between the front plate's bottom edge and the rim.
-roof_front_h = 36;
-roof_back_h = 8;
-roof_setback = 3;
+// Front arc radius (the door's travel region) and back top corner radius; flat top = cover_depth - roll_r1 - roll_r2
+roll_r1 = 60;
+roll_r2 = 35;
+// Inner rail added to the side walls in the roll-top zone; the door track is a channel in its inner face
+rail_t = 2.5;
+// Door track channel: width (slat thickness + play), depth into the rail, centre line below the outer outline
+track_w = 3.0;
+track_depth = 2.0;
+track_offset = 5.0;
+// Tambour door (printed flat, inner face down): slat width, hinge gap, slat thickness, outer-face chamfer,
+// living-hinge thickness, end clearance in the track, number of slats, handle ridge
+slat_w = 7;
+slat_gap = 2;
+slat_t = 2.4;
+slat_chamfer = 0.8;
+hinge_t = 0.4;
+slat_fit = 0.3;
+slats = 12;
+handle_h = 3;
+handle_w = 4;
+// Fixed rear roof (flat top + back corner) dropping into a rebate: thickness, outer lip kept at full height, clearance
 roof_t = 3.0;
 roof_lip = 1.0;
 roof_fit = 0.3;
-roof_gap = 0.5;
 
 /* [Fit test coupon: a mini bin + three mini lids with different fits] */
 test_w = 50;
@@ -119,17 +129,16 @@ bottom_t = skirt_t + groove_w + foot_t;     // 4.2: wall thickness at the very b
 foot_h = groove_depth + foot_extra;         // 6.05
 lid_h = groove_depth + lid_t;               // 8.25
 hole_off = 6;                               // where the swept wall profile stops and the flat floor begins (< corner_r)
-hood_h = top_h;                             // the cap's curve is measured from the container's rim
-roof_y0 = bin_d - cover_depth + roof_setback;   // y of the roof's front edge
-roof_yc = bin_d - roof_lip - roof_fit;          // back end of the roof (inside the back wall's lip)
-roof_a = roof_yc - roof_y0;                     // ellipse semi-axes of the dome curve
-roof_b = roof_front_h - roof_back_h;
-roof_step = roof_y0 - roof_t - roof_fit;        // the walls step up here: front plate + clearance sit between the lips
-// dome curve of the cap: quarter ellipse, horizontal tangent at the front top, vertical tangent at the back wall;
-// off > 0 moves it inward along the normal (true offset: inner face of the shell, rebate in the walls)
-function roof_curve(off = 0) = [for (k = [0 : 30])
-    let (t = k * 3, ny = -sin(t) / roof_a, nz = -cos(t) / roof_b, n = norm([ny, nz]))
-    [roof_y0 + roof_a * sin(t) + off * ny / n, roof_back_h + roof_b * cos(t) + off * nz / n]];
+roll_top_h = top_lip_h + roll_r1;           // height of the flat top above the bin rim
+back_wall_h = roll_top_h - roll_r2;         // where the back corner meets the back wall
+y_front = bin_d - cover_depth;              // front face of the container
+y_cap = y_front + roll_r1;                  // end of the door's arc = front edge of the fixed roof
+door_w = bin_w - 2 * (wall + rail_t) + 2 * (track_depth - slat_fit);
+door_len = slats * slat_w + (slats - 1) * slat_gap;
+// side-wall outline of the roll-top region (y, z above the rim), offset inward by off: arc, flat top, back corner
+function roll_profile(off = 0) = concat(
+    [for (k = [0 : 30]) let (a = 180 - 90 * k / 30) [y_front + roll_r1 + (roll_r1 - off) * cos(a), top_lip_h + (roll_r1 - off) * sin(a)]],
+    [for (k = [1 : 30]) let (a = 90 - 90 * k / 30) [bin_d - roll_r2 + (roll_r2 - off) * cos(a), roll_top_h - roll_r2 + (roll_r2 - off) * sin(a)]]);
 tiny = 0.01;
 $fn = 64;
 
@@ -219,65 +228,69 @@ module groove_fit(w, d, r, f) {
 }
 module lid() { lid_body(bin_w, bin_d, corner_r, fit); }
 
-// ---- Top container: floor + groove ring like a bin, front (bin_d - cover_depth) open right through (only the
-//      ring stays), closed box at the back; side and back walls rise above the rim under the cap's dome curve.
+// ---- Roll-top container: floor + groove ring like a bin, front third open right through, low front lip,
+//      side walls following the roll-top outline with inner rails that carry the door track, rebate for the roof
 module yz_prism(pts, x0, x1) { translate([x0, 0, 0]) rotate([90, 0, 90]) linear_extrude(x1 - x0) polygon(pts); }
 module top() {
     w = bin_w; d = bin_d; r = corner_r; sc = seam_chamfer;
-    h = top_h + max(roof_front_h, roof_back_h);
-    yf = d - cover_depth;
+    h = roll_top_h; yf = y_front;
+    outline = roll_profile(0);
+    rail_poly = concat([[yf - 0.01, floor_t - 0.01], [yf - 0.01, top_lip_h]], outline, [[d - wall + 0.01, back_wall_h], [d - wall + 0.01, floor_t - 0.01]]);
+    arc_low = [for (p = roll_profile(roof_t)) if (p[0] <= y_cap + 0.001) p];
+    rest = [for (p = outline) if (p[0] >= y_cap - 0.001) p];
+    inner = [for (p = roll_profile(roof_t)) if (p[0] >= y_cap - 0.001) p];
+    o1 = track_offset - track_w / 2; o2 = track_offset + track_w / 2;
+    outer_c = roll_profile(o1); inner_c = roll_profile(o2);
+    channel = concat(outer_c, [[d - o1, floor_t - 1], [d - o2, floor_t - 1]], [for (i = [len(inner_c) - 1 : -1 : 0]) inner_c[i]]);
+    x_in = wall + rail_t;
     difference() {
         union() {
             difference() {
                 union() { loft(w, d, r, sc, 0, 0, sc); prism(w, d, r, 0, sc, h); }
-                prism(w, d, r, wall, foot_h, h + 1);                                     // cavity
-                prism(w, d, r, bottom_t, floor_t, foot_h + tiny);                        // between the feet
+                prism(w, d, r, wall, foot_h, h + 1);
+                prism(w, d, r, bottom_t, floor_t, foot_h + tiny);
                 groove(w, d, r);
-                intersection() { prism(w, d, r, bottom_t, -1, h + 2); translate([-1, -1, -2]) cube([w + 2, yf + 1, h + 5]); }  // open front, through the floor
-                translate([-1, -1, foot_h]) cube([w + 2, yf + 1, h + 2]);               // open front above the ring
+                intersection() { prism(w, d, r, bottom_t, -1, h + 2); translate([-1, -1, -2]) cube([w + 2, yf + 1, h + 5]); }
+                translate([-1, -1, foot_h]) cube([w + 2, yf + 1, h + 2]);
             }
-            translate([wall - 0.01, yf, 0]) cube([w - 2 * wall + 0.02, wall, top_h]);   // container front wall
+            translate([wall - 0.01, yf, 0]) cube([w - 2 * wall + 0.02, wall, top_lip_h]);   // front lip
+            yz_prism(rail_poly, wall - 0.01, wall + rail_t);                              // rails
+            yz_prism(rail_poly, w - wall - rail_t, w - wall + 0.01);
         }
-        yz_prism(concat([[-10, top_h], [roof_step, top_h], [roof_step, top_h + roof_front_h]],
-                        [for (p = roof_curve()) [p[0], p[1] + top_h]],
-                        [[d + 10, top_h + roof_back_h], [d + 10, 400], [-10, 400]]), -1, w + 1);
-        intersection() {  // rebate for the cap
-            let (inner = roof_curve(roof_t), yb = roof_y0 + roof_fit)
-            yz_prism(concat([[roof_step - 0.01, top_h], [yb, top_h], [yb, top_h + inner[0][1]]],
-                            [for (p = inner) if (p[0] >= yb) [p[0], p[1] + top_h]],
-                            [[inner[30][0], top_h + roof_back_h - roof_t], [d + 10, top_h + roof_back_h - roof_t],
-                             [d + 10, 400], [roof_step - 0.01, 400]]), -1, w + 1);
-            prism(w, d, r, roof_lip, top_h, 500);
+        // wall tops: roof_t below the outline along the arc, on the outline from the arc's end
+        yz_prism(concat([[-10, top_lip_h], [yf + roof_t, top_lip_h]], arc_low, [[y_cap, roll_top_h]], rest,
+                        [[d + 10, back_wall_h], [d + 10, 400], [-10, 400]]), -1, w + 1);
+        intersection() {  // rebate for the roof
+            yz_prism(concat([[y_cap - 0.01, roll_top_h - roof_t]], inner,
+                            [[inner[len(inner) - 1][0], back_wall_h - roof_t], [d + 10, back_wall_h - roof_t], [d + 10, 400], [y_cap - 0.01, 400]]), -1, w + 1);
+            prism(w, d, r, roof_lip, top_lip_h, 500);
         }
+        yz_prism(channel, x_in - track_depth, x_in + 0.5);          // door track channels
+        yz_prism(channel, w - x_in - 0.5, w - x_in + track_depth);
     }
 }
-// ---- Roof: one-piece cap = dome shell + vertical front plate (one C-shaped profile swept between the lips).
-//      Drops into the rebate along the side and back walls.  Modelled in use orientation; roof() rotates it
-//      onto its side for printing (zero overhangs, use a brim).
+// ---- Fixed rear roof: flat top + back corner, drops into the rebate; the door slides underneath.
+//      Modelled in use orientation; roof() rotates it onto its side for printing (use a brim).
 module roof_in_use() {
-    outer = roof_curve();
-    inner = roof_curve(roof_t);
-    ys = roof_y0 - roof_t;
-    zb = roof_back_h - roof_t;
-    yz_prism(concat([[ys, roof_front_h]], outer, [[roof_yc, zb], [inner[30][0], zb]],
-                    [for (i = [len(inner) - 1 : -1 : 0]) inner[i]], [[roof_y0, roof_gap], [ys, roof_gap]]),
+    outer = concat([[y_cap + roof_fit, roll_top_h]], [for (p = roll_profile(0)) if (p[0] > y_cap + roof_fit) p]);
+    inner = concat([[y_cap + roof_fit, roll_top_h - roof_t]], [for (p = roll_profile(roof_t)) if (p[0] > y_cap + roof_fit) p]);
+    zb = back_wall_h - roof_t;
+    yz_prism(concat(outer, [[outer[len(outer) - 1][0], zb], [inner[len(inner) - 1][0], zb]], [for (i = [len(inner) - 1 : -1 : 0]) inner[i]]),
              roof_lip + roof_fit, bin_w - roof_lip - roof_fit);
 }
-module roof() { translate([0, 0, bin_w - roof_lip - roof_fit]) rotate([0, 90, 0]) translate([0, -(roof_y0 - roof_t), -roof_gap]) roof_in_use(); }
-// ---- Tray: drops into the hood from above and rests on the ledge
-module tray() {
-    module rr2(off) {  // rounded rect with different back / front corner radii
-        hull() {
-            for (x = [tray_back_r, tray_w - tray_back_r]) translate([x, tray_d - tray_back_r]) circle(r = tray_back_r - off);
-            for (x = [tray_front_r, tray_w - tray_front_r]) translate([x, tray_front_r]) circle(r = tray_front_r - off);
-        }
+module roof() { translate([0, 0, bin_w - roof_lip - roof_fit]) rotate([0, 90, 0]) translate([0, -(y_cap + roof_fit), -(back_wall_h - roof_t)]) roof_in_use(); }
+// ---- Tambour door, printed flat with the inner face on the bed: chamfered slats + living hinges + handle ridge
+module door() {
+    xh0 = track_depth - slat_fit + 0.5; xh1 = door_w - (track_depth - slat_fit) - 0.5;
+    for (i = [0 : slats - 1]) let (y0 = i * (slat_w + slat_gap)) {
+        yz_prism([[y0, 0], [y0 + slat_w, 0], [y0 + slat_w - slat_chamfer, slat_t], [y0 + slat_chamfer, slat_t]], 0, door_w);
+        if (i < slats - 1) translate([xh0, y0 + slat_w - 0.3, 0]) cube([xh1 - xh0, slat_gap + 0.6, hinge_t]);
     }
-    difference() {
-        linear_extrude(tray_h) rr2(0);
-        translate([0, 0, tray_floor]) linear_extrude(tray_h) rr2(tray_wall);
+    hull() {
+        translate([xh0 + 10, slat_chamfer, slat_t - 0.5]) cube([xh1 - xh0 - 20, slat_w - 2 * slat_chamfer, 0.5]);
+        translate([xh0 + 10, slat_w / 2 - handle_w / 2, slat_t - 0.5]) cube([xh1 - xh0 - 20, handle_w, handle_h + 0.5]);
     }
 }
-module tray_in_hood(z) { translate([wall + tray_fit, bin_d - cover_depth, z + ledge_z]) tray(); }
 
 // ---- Fit test coupon: one mini bin + a mini lid per fit, 1/2/3 notches on the front face
 module engrave(txt, cx, cy, z_top) {  // text readable from +z, cut test_text_depth down from z_top
@@ -299,10 +312,10 @@ module test() {
 module lid_in_use(z) {  // flipped from print orientation onto the top of the stack
     translate([0, bin_d, z + lid_h]) rotate([180, 0, 0]) lid();
 }
-module assembly(gap = 0) {  // top container + cap (default)
+module assembly(gap = 0) {  // roll-top container + fixed roof (the door is not drawn in the OpenSCAD preview)
     for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
     translate([0, 0, bins * bin_h + bins * gap]) top();
-    translate([0, 0, bins * bin_h + top_h + (bins + 1) * gap]) roof_in_use();
+    translate([0, 0, bins * bin_h + (bins + 1) * gap]) roof_in_use();
 }
 module assembly_lid(gap = 0) {  // flat lid on top
     for (i = [0 : bins - 1]) translate([0, 0, i * (bin_h + gap)]) bin();
@@ -323,5 +336,6 @@ else if (part == "bin") bin();
 else if (part == "lid") lid();
 else if (part == "top") top();
 else if (part == "roof") roof();
+else if (part == "door") door();
 else if (part == "test") test();
 else if (part == "joint") joint(10);
