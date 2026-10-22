@@ -75,13 +75,8 @@ foot_h = groove_depth + D("foot_extra")
 lid_h = groove_depth + D("lid_t")
 hole_off = 6.0
 rim_zone = D("rim_zone")
-hood_h, cover_depth, tray_h = D("hood_h"), D("cover_depth"), D("tray_h")
-tray_wall, tray_floor, tray_fit = D("tray_wall"), D("tray_floor"), D("tray_fit")
-ledge_w, ledge_h, tray_front_r = D("ledge_w"), D("ledge_h"), D("tray_front_r")
-ledge_z = hood_h - tray_h
-tray_w = bin_w - 2 * wall - 2 * tray_fit
-tray_d = cover_depth - wall - tray_fit
-tray_back_r = corner_r - wall - tray_fit
+top_h, cover_depth = D("top_h"), D("cover_depth")
+hood_h = top_h  # rim height of the top container above the bin rim (the cap's curve is measured from here)
 roof_front_h, roof_back_h, roof_setback = D("roof_front_h"), D("roof_back_h"), D("roof_setback")
 roof_t, roof_lip, roof_fit, roof_gap = D("roof_t"), D("roof_lip"), D("roof_fit"), D("roof_gap")
 roof_y0 = bin_d - cover_depth + roof_setback   # y of the shell's front end (the walls' step); the front plate hangs just in front
@@ -304,42 +299,53 @@ def build_bin():
     return bin_body(bin_w, bin_d, corner_r, bin_h)
 
 
-def build_hood():
-    """Three walls + the bottom groove ring, open at the front above the ring, inner ledge for the
-    tray; side and back walls rise above the rim under the roof curve."""
-    h = hood_h + max(roof_front_h, roof_back_h)
-    prof = [(sc, 0), (0, sc), (0, h), (wall, h),
-            (wall, ledge_z), (wall + ledge_w, ledge_z), (wall + ledge_w, ledge_z - ledge_h),
-            (wall, ledge_z - ledge_h - ledge_w),                          # 45° under the ledge
-            (wall, foot_h), (bottom_t, foot_h), (bottom_t, 0)] + groove_profile(fit)
-    ob = sweep("hood", bin_w, bin_d, corner_r, prof, closed=True)
-    above = [(-10, hood_h), (roof_step, hood_h), (roof_step, hood_h + roof_front_h)] + \
-        [(y, z + hood_h) for y, z in roof_curve()] + \
-        [(bin_d + 10, hood_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]   # the curve is vertical at its back end
-    difference(ob, [box(-1, -1, foot_h, bin_w + 2, bin_d - cover_depth + 1, h + 2)])   # open front
+def build_top():
+    """One-piece top container: same floor and groove ring as a bin, but the front (bin_d - cover_depth)
+    is open right through (only the 6 mm groove ring stays) so a hand reaches the tissues in the bin
+    below; the back cover_depth is a closed box.  Side and back walls rise above the rim under the cap's
+    dome curve, with the rebate for the cap."""
+    h = top_h + max(roof_front_h, roof_back_h)
+    prof = [(hole_off, 0)] + groove_profile(fit) + [
+        (sc, 0), (0, sc), (0, h), (wall, h),
+        (wall, foot_h), (bottom_t, foot_h), (bottom_t, floor_t), (hole_off, floor_t)]
+    ob = sweep("top", bin_w, bin_d, corner_r, prof)
+    yf = bin_d - cover_depth
+    # open front: everything inside the ring, and everything above the ring, for y < yf
+    inside = sweep("inside_ring", bin_w, bin_d, corner_r, [(hole_off, -1), (bottom_t, -1), (bottom_t, 400), (hole_off, 400)])
+    intersection(inside, box(-1, -1, -2, bin_w + 2, yf + 1, 500))
+    difference(ob, [inside])
     clean(ob)
-    difference(ob, [yz_prism("above_roof", above, -1, bin_w + 1)])                     # walls stop at the roof curve
+    difference(ob, [box(-1, -1, foot_h, bin_w + 2, yf + 1, h + 2)])
     clean(ob)
-    # rebate for the roof: inside the outer lip (offset >= roof_lip) the wall top is roof_t lower
+    # front wall of the container
+    union([ob, box(wall - 0.01, yf, 0, bin_w - 2 * wall + 0.02, wall, top_h, "front_wall")], "top")
+    clean(ob)
+    # walls stop at the cap's dome curve (vertical step up at roof_step, curve vertical at its back end)
+    above = [(-10, top_h), (roof_step, top_h), (roof_step, top_h + roof_front_h)] + \
+        [(y, z + top_h) for y, z in roof_curve()] + \
+        [(bin_d + 10, top_h + roof_back_h), (bin_d + 10, 400), (-10, 400)]
+    difference(ob, [yz_prism("above_roof", above, -1, bin_w + 1)])
+    clean(ob)
+    # rebate for the cap: inside the outer lip (offset >= roof_lip) the wall top is roof_t lower
     inner = roof_curve(roof_t)
-    yb = roof_y0 + roof_fit                                      # clearance behind the front plate
-    rebate = [(roof_step - 0.01, hood_h), (yb, hood_h), (yb, hood_h + inner[0][1])] + \
-        [(y, z + hood_h) for y, z in inner if y >= yb] + \
-        [(inner[-1][0], hood_h + roof_back_h - roof_t), (bin_d + 10, hood_h + roof_back_h - roof_t),
+    yb = roof_y0 + roof_fit
+    rebate = [(roof_step - 0.01, top_h), (yb, top_h), (yb, top_h + inner[0][1])] + \
+        [(y, z + top_h) for y, z in inner if y >= yb] + \
+        [(inner[-1][0], top_h + roof_back_h - roof_t), (bin_d + 10, top_h + roof_back_h - roof_t),
          (bin_d + 10, 400), (roof_step - 0.01, 400)]
     cutter = yz_prism("rebate", rebate, -1, bin_w + 1)
-    inside = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, hood_h), (roof_lip, hood_h), (roof_lip, 500), (hole_off, 500)])
-    intersection(cutter, inside)
+    inside2 = sweep("inside", bin_w, bin_d, corner_r, [(hole_off, top_h), (roof_lip, top_h), (roof_lip, 500), (hole_off, 500)])
+    intersection(cutter, inside2)
     difference(ob, [cutter])
     clean(ob)
-    assert len(ob.data.vertices) > 0, "hood boolean produced an empty mesh"
+    assert len(ob.data.vertices) > 0, "top boolean produced an empty mesh"
     return ob
 
 
 def build_roof(in_use=False):
     """One-piece cap: dome shell + vertical front plate, one C-shaped profile swept across the width
-    between the hood's lips.  It drops into the rebate along the side and back walls; the front plate
-    hangs down to roof_gap above the tray rim.  Modelled in use orientation (z relative to the hood
+    between the top container's lips.  It drops into the rebate along the side and back walls; the front
+    plate hangs down to roof_gap above the container's front wall.  Modelled in use orientation (z relative to the hood
     rim); exported lying on its side (zero overhangs, needs a brim)."""
     outer = roof_curve()
     inner = roof_curve(roof_t)
@@ -360,44 +366,6 @@ def build_roof(in_use=False):
             bm.free()
         lo, _ = bbox(ob)
         transform_verts(ob, lambda v: (v.x - lo[0], v.y - lo[1], v.z - lo[2]))
-    return ob
-
-
-def build_tray():
-    radii = (tray_back_r, tray_back_r, tray_front_r, tray_front_r)
-    ho = tray_wall + 0.3
-    prof = [(ho, 0), (0, 0), (0, tray_h), (tray_wall, tray_h), (tray_wall, tray_floor), (ho, tray_floor)]
-    return sweep("tray", tray_w, tray_d, radii, prof)
-
-
-def build_lid():
-    return lid_body(bin_w, bin_d, corner_r, fit)
-
-
-def text_cutter(text, cx, cy, z_top, size, depth):
-    """Extruded text (readable from +z) whose top is at z_top, going `depth` down: subtract it to engrave."""
-    cu = bpy.data.curves.new("txt", type="FONT")
-    cu.body = text
-    cu.size = size
-    cu.align_x = "CENTER"
-    cu.align_y = "CENTER"
-    cu.extrude = depth / 2 + 0.5
-    ob = bpy.data.objects.new("txt", cu)
-    bpy.context.scene.collection.objects.link(ob)
-    bpy.ops.object.select_all(action="DESELECT")
-    ob.select_set(True)
-    bpy.context.view_layer.objects.active = ob
-    bpy.ops.object.convert(target="MESH")
-    ob = bpy.context.view_layer.objects.active
-    e = depth / 2 + 0.5                     # converted mesh spans z in [-e, e]
-    transform_verts(ob, lambda v: (v.x + cx, v.y + cy, v.z + z_top - depth + e))  # -> [z_top - depth, z_top + 1]
-    clean(ob)
-    if volume(ob) < 0:
-        bm = bmesh.new()
-        bm.from_mesh(ob.data)
-        bmesh.ops.reverse_faces(bm, faces=bm.faces)
-        bm.to_mesh(ob.data)
-        bm.free()
     return ob
 
 
@@ -563,10 +531,8 @@ def place_stack(parts, gap=0.0, ghost=True, alternate=False, top="hood"):
         objs.append(copy_obj(parts["bin"], f"a_bin{i}", 0, 0, i * (bin_h + gap), col))
     z_lid = N_BINS * bin_h + N_BINS * gap
     if top == "hood":
-        objs.append(copy_obj(parts["hood"], "a_hood", 0, 0, z_lid, IVORY))
-        objs.append(copy_obj(parts["tray"], "a_tray", wall + tray_fit, bin_d - cover_depth, z_lid + ledge_z + gap,
-                             IVORY_B if alternate else IVORY))
-        objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, z_lid + hood_h + 2 * gap, IVORY_B if alternate else IVORY))
+        objs.append(copy_obj(parts["top"], "a_top", 0, 0, z_lid, IVORY))
+        objs.append(copy_obj(parts["roof_use"], "a_roof", 0, 0, z_lid + top_h + gap, IVORY_B if alternate else IVORY))
         return objs
     objs.append(copy_obj(parts["lid"], "a_lid", 0, 0, z_lid, IVORY, flip=True))
     if ghost:
@@ -591,13 +557,11 @@ def build_section():
     z0 = (N_BINS - 1) * bin_h
     top = build_bin()
     transform_verts(top, lambda v: (v.x, v.y, v.z + z0))
-    hood = build_hood()
-    transform_verts(hood, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
-    tray = build_tray()
-    transform_verts(tray, lambda v: (v.x + wall + tray_fit, v.y + bin_d - cover_depth, v.z + N_BINS * bin_h + ledge_z))
+    cont = build_top()
+    transform_verts(cont, lambda v: (v.x, v.y, v.z + N_BINS * bin_h))
     roof = build_roof(in_use=True)
-    transform_verts(roof, lambda v: (v.x, v.y, v.z + N_BINS * bin_h + hood_h))
-    parts = [top, hood, tray, roof]
+    transform_verts(roof, lambda v: (v.x, v.y, v.z + N_BINS * bin_h + top_h))
+    parts = [top, cont, roof]
     for ob in parts:
         intersection(ob, box(bin_w / 2, -5, z0 - 1, bin_w, bin_d + 10, 400))
     ob = join(parts, "section")
@@ -615,6 +579,8 @@ def main():
     iw, idp, ih = bin_w - 2 * wall, bin_d - 2 * wall, bin_h - floor_t
     ir = corner_r - wall
     cavity_l = (iw * idp - (4 - math.pi) * ir * ir) * ih / 1e6
+    print(f"stackable-bins: top container {bin_w - 2 * wall:.0f} x {cover_depth - 2 * wall:.0f} x {top_h - floor_t:.0f} mm inside, "
+          f"hand opening {bin_w - 2 * bottom_t:.0f} x {bin_d - cover_depth - bottom_t:.0f} mm")
     print(f"stackable-bins v0.1: solver {SOLVER}; inner cavity {iw:.1f} x {idp:.1f} x {ih:.1f} mm "
           f"(~{cavity_l:.2f} L); printed bin height {bin_h + lip_h:.2f} mm; lid {lid_h:.2f} mm; "
           f"stack of {N_BINS} = {N_BINS * bin_h + lid_h:.1f} mm; rim_t {rim_t:.2f}; bottom_t {bottom_t:.2f}; "
@@ -624,8 +590,7 @@ def main():
     if bin_h + lip_h > 180:
         print("WARNING: bin taller than 180 mm")
 
-    parts = {"bin": build_bin(), "lid": build_lid(), "hood": build_hood(), "tray": build_tray(), "roof": build_roof(),
-             "test": build_test()}
+    parts = {"bin": build_bin(), "lid": build_lid(), "top": build_top(), "roof": build_roof(), "test": build_test()}
     for name, ob in parts.items():
         export_stl(ob, {"test": "test-coupon"}.get(name, name) + ".stl")
         lo, hi = bbox(ob)
@@ -664,7 +629,7 @@ def main():
     bpy.context.scene.render.resolution_y = 800
     x = 0
     objs = []
-    for name, col in (("bin", IVORY), ("lid", IVORY), ("hood", IVORY), ("tray", IVORY), ("roof", IVORY), ("test", ORANGE)):
+    for name, col in (("bin", IVORY), ("lid", IVORY), ("top", IVORY), ("roof", IVORY), ("test", ORANGE)):
         ob = parts[name]
         lo, hi = bbox(ob)
         objs.append(copy_obj(ob, f"p_{name}", x - lo[0], -lo[1], -lo[2], col))
