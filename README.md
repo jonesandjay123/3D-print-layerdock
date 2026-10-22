@@ -7,7 +7,7 @@ Jones 的 3D 列印產品 repo。每個產品是 `projects/` 底下一個獨立�
 | 產品 | 用途 | 狀態 |
 | --- | --- | --- |
 | [LayerDock Open Frame](projects/open-frame/) | Base + Layer × N + Top 的鏤空設備架：Mac mini 放頂部，Xbox Series S 直立放在裡面、從前方抽出 | v0.1.1，已實際列印並組裝成功（2026-10-20） |
-| [LayerDock Stackable Bins](projects/stackable-bins/) | 外觀極簡、圓角、可堆疊的隱藏式收納箱 Bin × N + Lid × 1，取代桌上墊高衛生紙盒的空紙箱 | v0.1，設計完成、切片驗證，待實際列印 |
+| [LayerDock Stackable Bins](projects/stackable-bins/) | 外觀極簡、圓角、可堆疊的隱藏式收納箱 Bin × N，頂層是捲簾容器（或平蓋），取代桌上墊高衛生紙盒的空紙箱 | v0.3：三個 Bin 已印好疊起來（2026-10-22）；捲簾頂層三件已切片，待列印 |
 
 ## 目錄
 

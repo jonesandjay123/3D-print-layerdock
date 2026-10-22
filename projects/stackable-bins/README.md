@@ -64,6 +64,21 @@ Jones 的用法（2026-10-22 照片）：最上層的 Bin 放抽取式衛生紙�
 - 門從底板的開口裝入：把門捲成弧、兩端對準後牆底部的溝槽往上推，再沿軌道推到前面。
 - 開口 158 × 53 mm，手要伸進 120 mm 深的 Bin 抓衛生紙，衛生紙包放靠前面比較好抽。
 
+## 要印的檔案在哪
+
+已切好的 Bambu Studio 專案檔（A1 mini、PLA Basic、0.20 mm、3 層牆、象腳補償 0.15）都在 [`print/`](print/)，直接開啟按 Print：
+
+| 檔案 | 零件 | 數量 | 時間 / 材料 | 備註 |
+| --- | --- | --- | --- | --- |
+| `print/bin.3mf` | Bin | 2–3 | 4 h 03 m / 255 g | 已印 3 個 |
+| `print/door.3mf` | 捲簾門 | 1 | 53 m / 34 g | **建議先印**，看活頁能不能彎 |
+| `print/top.3mf` | 捲簾容器 | 1 | 3 h 10 m / 142 g | 直立，免支撐 |
+| `print/roof.3mf` | 後半固定頂蓋 | 1 | 1 h 30 m / 45 g | 側躺，已開 8 mm brim，印完撕掉 |
+| `print/lid.3mf` | 平蓋 | 0–1 | 1 h 48 m / 105 g | 不用捲簾頂層時才印 |
+| `print/test-coupon.3mf` | 接合試件 | — | 57 m / 40 g | 已印、已測 |
+
+STL 在 [`stl/`](stl/)（同名），圖在 [`docs/images/`](docs/images/)：`assembly-top.png` 關、`assembly-open.png` 開、`exploded.png` 爆炸圖、`parts.png` 零件、`section.png` 剖面。
+
 ## 各零件
 
 已切好的 Bambu Studio 專案檔在 [`print/`](print/)（A1 mini、Bambu PLA Basic、0.20 mm Standard、紋理 PEI、**3 層牆、象腳補償 0.15 mm**，其餘預設），直接開啟按 Print。要印第 N 個 Bin 就再開一次 `print/bin.3mf`。
